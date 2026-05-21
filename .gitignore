@@ -1,0 +1,16 @@
+# Dockerfile 변경 추적용 백업
+*.bak
+*.bak.*
+
+# 임시 로그
+*.log
+
+# 미션 제공 바이너리 (zip에서 추출, 별도 다운로드)
+agent-app
+
+# macOS
+.DS_Store
+
+# 에디터 메타
+.vscode/
+.idea/
