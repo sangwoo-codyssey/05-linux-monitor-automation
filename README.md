@@ -72,12 +72,12 @@ docker exec codyssey05 ldd --version    # GLIBC 버전
 | [x] | 사용자 생성 + 보조 그룹 가입 | `useradd -m -s /bin/bash -G agent-common,agent-core agent-admin` | ✅ |
 | [x] | 디렉터리 트리 생성 | `mkdir -p $AGENT_HOME/{upload_files,api_keys}` | ✅ |
 | [x] | 그룹 소유권 + R/W (POSIX 권한) | `chown :agent-core`, `chmod 770` | ✅ |
-| [x] | **setgid (`2xxx`)** — 새 파일이 부모 그룹 상속 | `chmod 2770` | ⭕ 권장 (정책 일관성) |
+| [~] | **setgid (`2xxx`)** — 새 파일이 부모 그룹 상속 | `chmod 2770` | ⭕ 권장 (운영 위생) — **본 사이클 보류 (§ 11-6 / 부록 C M1)** |
 | [x] | **default ACL** — 새 파일에 정책 자동 적용 | `setfacl -d -m g:agent-core:rwx ...` | ⭕ 권장 (평가 증거) |
 | [x] | 부모 디렉터리 traverse 권한 (24.04 함정 수정) | `chown :agent-common /home/agent-admin` | — (트러블슈팅) |
 | [x] | 빙의(sudo -u) 차단 동작 검증 | `sudo -u agent-test touch .../api_keys/x` → Permission denied | ✅ |
 
-> **✅ 미션 명시 / ⭕ 권장**: 미션 요구사항엔 *"group=X, R/W 가능"* 만 명시. setgid와 default ACL은 *운영 정책 일관성*과 *평가 체크리스트의 "ACL 포함"* 항목 충족을 위해 추가 권장.
+> **✅ 미션 명시 / ⭕ 권장 / [~] 권장 보류**: 미션 요구사항엔 *"group=X, R/W 가능"* 만 명시. setgid와 default ACL은 *운영 위생*과 *평가 체크리스트의 "ACL 포함"* 항목 충족을 위해 추가 권장. setgid 는 본 사이클에서 자연 발견 학습 후 보류 결정 — § 11-6 / 부록 C M1 참조.
 
 ### 3-5. 환경 변수 + 키 파일
 
@@ -117,12 +117,15 @@ docker exec codyssey05 ldd --version    # GLIBC 버전
 | [x] | 로그 누적 (포맷 일치) | `printf >> /var/log/agent-app/monitor.log` |
 | [x] | 로그 로테이션 (10MB / 10개) | `rotate_log_if_needed` |
 
-### 3-8. cron 자동 실행 (예정)
+### 3-8. cron 자동 실행
 
 | 완료 | 항목 | 핵심 명령어 |
 |:----:|------|------------|
-| [ ] | agent-admin crontab 등록 (매분) | `crontab -u agent-admin -e` |
-| [ ] | 1~2분 대기 후 monitor.log 누적 확인 | `tail -f /var/log/agent-app/monitor.log` |
+| [x] | `cron` 패키지 설치 (24.04 minimal 미포함 — 자연 발견) | `apt install -y cron` |
+| [x] | cron 데몬 기동 | `service cron start` |
+| [x] | agent-admin crontab 등록 (매분) | `crontab -u agent-admin -e` |
+| [x] | 1~2분 대기 후 monitor.log 누적 확인 | `tail -5 /var/log/agent-app/monitor.log` |
+| [x] | agent-dev / agent-test 접근성 검증 | `su - <user> -c 'cat .../monitor.log'` |
 
 ---
 
@@ -690,7 +693,7 @@ uid=1003(agent-test)  gid=1005(agent-test)  groups=1005(agent-test),1001(agent-c
 | 메커니즘 | 책임 | 본 미션 필요성 |
 |----------|------|----------------|
 | **POSIX 권한** (`chmod 770`, `chown :group`) | owner / 그룹 / others의 rwx 정의 — *현재 디렉터리에 대한* 기본 접근 정책 | **필수** — 미션 명시 |
-| **setgid (`2xxx`)** | 새 파일/디렉터리가 *부모의 그룹*을 자동 상속 (group 하나만) | **핵심** — 정책 일관성 |
+| **setgid (`2xxx`)** | 새 파일/디렉터리가 *부모의 그룹*을 자동 상속 (group 하나만) | **핵심** — 운영 위생 |
 | **default ACL** (`setfacl -d -m`) | 새 파일/디렉터리에 *그룹·권한 비트 전체*를 자동 적용 (다중 그룹 가능) | 보조 — 미션 평가 증거 |
 
 **미션 정책 입장에서의 차이**:
@@ -730,6 +733,8 @@ root@codyssey05:/app# chmod 2770                     /home/agent-admin/agent-app
 root@codyssey05:/app# chown agent-admin:agent-core   /var/log/agent-app
 root@codyssey05:/app# chmod 2770                     /var/log/agent-app
 ```
+
+> **⚠️ 본 사이클 실제 적용 상태**: 위 블록은 *학습용 표준 형태* (setgid 포함). 실제 `setup-mission.sh` 는 자연 발견 흐름을 위해 setgid 비트 없는 `chmod 750/770` 으로 적용 — § 11-4 에서 monitor.log 그룹 비일관을 직접 관찰하고 § 11-6 에서 보류 결정 (부록 C M1).
 
 ![스크린샷](screenshots/perm-06.png)
 
@@ -970,8 +975,6 @@ To                         Action      From
 
 ### 8-6. ✅ agent-admin 빙의 검증
 
-![스크린샷](screenshots/env-05.png)
-
 ```bash
 root@codyssey05:/app# su - agent-admin
 agent-admin@codyssey05:~$ env | grep AGENT_ | sort
@@ -1037,8 +1040,6 @@ GLIBC_2.38
 
 ### 9-3. 해결책 — Dockerfile을 24.04로 전환
 
-![스크린샷](screenshots/glibc-03.png)
-
 ```bash
 # 호스트(macOS) 에서 — Dockerfile 한 줄 수정
 sangwoo@sangwoo-MacBookAir % sed -i.bak 's|ubuntu:22.04|ubuntu:24.04|' Dockerfile
@@ -1066,8 +1067,6 @@ sangwoo@sangwoo-MacBookAir % ./run.sh up
 > **`down` → 모든 컨테이너 상태(사용자/그룹/UFW/sshd_config) 소실**. 1~4단계를 처음부터 다시 해야 하지만, `setup-mission.sh` 가 이미 idempotent하게 작성되어 있어 한 번에 복구.
 
 ### 9-5. 24.04 환경 확인 + 1~4단계 일괄 복구
-
-![스크린샷](screenshots/glibc-04.png)
 
 ```bash
 # 컨테이너 안 — 24.04 + GLIBC 2.39 확인
@@ -1148,8 +1147,6 @@ OPEN
 
 ### 9-9. 프로세스 확인 — root 아닌 agent-admin
 
-![스크린샷](screenshots/boot-03.png)
-
 ```bash
 root@codyssey05:/# ps -ef | grep -v grep | grep agent-app
 agent-a+  2072  2070  0 12:18 ?  00:00:00 /run/rosetta/rosetta /app/agent-app /app/agent-app
@@ -1170,7 +1167,7 @@ agent-a+  2073  2072 13 12:18 ?  00:00:01 /run/rosetta/rosetta /app/agent-app /a
 # bin 디렉터리 생성
 root@codyssey05:/app# mkdir -p /home/agent-admin/agent-app/bin
 root@codyssey05:/app# chown agent-dev:agent-core /home/agent-admin/agent-app/bin
-root@codyssey05:/app# chmod 2750                  /home/agent-admin/agent-app/bin
+root@codyssey05:/app# chmod 750                   /home/agent-admin/agent-app/bin    # 본 사이클은 setgid 미적용 — § 11-6 참조
 
 # monitor.sh 배치 (소유자 agent-dev, 그룹 agent-core, 모드 750)
 root@codyssey05:/app# cp /app/monitor.sh /home/agent-admin/agent-app/bin/monitor.sh
@@ -1298,8 +1295,6 @@ fi
 
 #### 함정 C — pgrep 패턴이 너무 넓으면 잡음 매치
 
-![스크린샷](screenshots/monitor-07.png)
-
 ```bash
 # 처음 시도 — pgrep -f /app/agent-app
 root@codyssey05:/app# pgrep -fa "/app/agent-app"
@@ -1316,8 +1311,6 @@ root@codyssey05:/app# pgrep -fa "/app/agent-app$"
 ```
 
 ### 10-6. ✅ 최종 실행 결과
-
-![스크린샷](screenshots/monitor-08.png)
 
 ```bash
 root@codyssey05:/app# sudo -u agent-admin /home/agent-admin/agent-app/bin/monitor.sh
@@ -1341,8 +1334,6 @@ DISK Used : 4%
 
 ### 10-7. ✅ 로그 누적 — 미션 포맷 일치
 
-![스크린샷](screenshots/monitor-09.png)
-
 ```bash
 root@codyssey05:/app# tail -5 /var/log/agent-app/monitor.log
 [2026-05-18 15:44:10] PID:0 CPU:0.0% MEM:0.0% DISK_USED:0%
@@ -1354,22 +1345,249 @@ root@codyssey05:/app# tail -5 /var/log/agent-app/monitor.log
 
 ---
 
-## 11. crontab 자동 실행 (예정)
+## 11. crontab 자동 실행
 
-### 11-1. 등록 명령 (예정)
+### 11-0. 트러블슈팅 — cron 설치 시도에서 연속 2 함정
+
+cron 패키지 설치를 시도하는 과정에서 두 함정이 시간순으로 *연속* 발견됨.
+한 명령 한 명령씩 막혔던 순서대로 정리.
+
+#### 1) `which cron` — 빈 줄
 
 ```bash
-# agent-admin 계정의 crontab으로 매분 등록
+root@codyssey05:/app# which cron crontab
+(빈 줄 — 둘 다 없음)
+
+root@codyssey05:/app# service cron start
+cron: unrecognized service
+```
+
+→ `iproute2`, `sudo` 에 이어 **24.04 minimal 누락 함정 3 호**. `apt install` 로 보충 필요.
+
+#### 2) `apt-get update` — 타임아웃으로 멈춤
+
+```bash
+root@codyssey05:/app# apt-get update
+0% [Connecting to archive.ubuntu.com (...)]
+(타임아웃)
+```
+
+#### 원인 분석 — UFW + docker NAT 충돌
+
+`ufw default allow outgoing` 이 켜져있어도, **컨테이너 안에서는 docker 의 NAT/iptables 규칙과 UFW 의 iptables 가 충돌** 해 outbound TCP 의 return 트래픽 (SYN-ACK) 이 제대로 안 들어옴.
+운영 환경에서는 **컨테이너 안 UFW 자체가 안티패턴** — 호스트 측 UFW + 컨테이너 안 nofw 가 표준.
+
+본 미션은 학습 목적이라 컨테이너 안 UFW 를 유지하므로, **apt 작업 시 일시적 disable** 패턴 필요.
+
+#### 해결 — UFW 토글 + 설치
+
+```bash
+# UFW 일시 비활성화 → apt 작업 → 재활성화
+root@codyssey05:/app# ufw disable
+root@codyssey05:/app# apt-get update && apt-get install -y cron
+root@codyssey05:/app# ufw enable
+
+root@codyssey05:/app# which cron crontab
+/usr/sbin/cron
+/usr/bin/crontab
+```
+
+#### 영구 반영
+- `Dockerfile` 의 apt 라인에 `cron` 추가 (다음 빌드부터 자동)
+- 함정 모음 부록 D 에 두 줄 (cron 미설치 + UFW outbound 차단) 기록
+
+#### 학습 포인트
+- 24.04 minimal 누락 함정의 **연쇄 발견** — 한 함정 fix 시도 중 다른 함정 노출
+- 컨테이너 + UFW = **상시 안티패턴**. 학습용일 때만 정당화, 운영에선 호스트로 격리
+- `apt 작업 = UFW disable → 설치 → UFW enable` 의 운영 패턴화
+
+---
+
+### 11-1. cron 데몬 기동
+
+```bash
+root@codyssey05:/app# service cron start
+ * Starting periodic command scheduler cron       [ OK ]
+
+root@codyssey05:/app# service cron status
+ * cron is running
+```
+
+24.04 컨테이너엔 systemd 가 없으므로 `systemctl` 이 아닌 `service` 사용 (SSH 단계와 동일 패턴).
+
+---
+
+### 11-2. crontab 등록 — agent-admin 매분 실행
+
+`crontab -u agent-admin -e` 로 인터랙티브 등록:
+
+```bash
 root@codyssey05:/app# crontab -u agent-admin -e
-# 추가할 라인:
-# * * * * * /home/agent-admin/agent-app/bin/monitor.sh >/dev/null 2>&1
+no crontab for agent-admin - using an empty one
+
+Select an editor.  To change later, run 'select-editor'.
+  1. /bin/nano        <---- easiest
+  2. /usr/bin/vim.basic
+  ...
+Choose 1-4 [1]: 2
 ```
 
-### 11-2. 1~2분 후 monitor.log 누적 확인 (예정)
+vim 안에서 한 줄 입력:
+
+```cron
+* * * * * /home/agent-admin/agent-app/bin/monitor.sh
+```
+
+저장 후:
 
 ```bash
-root@codyssey05:/app# tail -f /var/log/agent-app/monitor.log
+crontab: installing new crontab
+
+root@codyssey05:/app# crontab -u agent-admin -l
+* * * * * /home/agent-admin/agent-app/bin/monitor.sh
 ```
+
+![스크린샷](screenshots/monitor-04.png)
+
+#### cron 라인 해부
+
+```
+* * * * *  /home/agent-admin/agent-app/bin/monitor.sh
+│ │ │ │ │
+│ │ │ │ └─ 요일 (0-7, 일=0 또는 7)
+│ │ │ └─── 월 (1-12)
+│ │ └───── 일 (1-31)
+│ └─────── 시 (0-23)
+└───────── 분 (0-59)
+```
+
+→ `* * * * *` = **매분 실행**
+
+#### stdout/stderr 처리 — 미션 충실 진행
+
+미션 명시는 **`monitor.log` 누적**만이라, cron 라인에 stdout/stderr 리다이렉트는 두지 않음.
+운영 권장 사항 (`>> monitor-cron.log 2>&1` 또는 `>/dev/null 2>&1`) 은 본 사이클에선 보류 —
+한 번 silent 흐름을 체험해 운영 권장 항목의 필요성 자체를 자연 발견하는 학습 흐름 선택.
+
+> **운영 환경 권장 패턴**:
+> ```cron
+> * * * * * /path/monitor.sh >> /var/log/agent-app/monitor-cron.log 2>&1
+> ```
+> — silent failure 예방 + 트러블슈팅 추적성 확보
+
+---
+
+### 11-3. 1~2분 대기 후 monitor.log 누적 확인
+
+매분 정각 (`HH:MM:00`) 에 cron 트리거. 1~2 분 대기 후:
+
+```bash
+root@codyssey05:/var/log/agent-app# ls -al
+total 696
+drwxrwx---+ 2 agent-admin agent-core    4096 May 22 03:33 .
+drwxr-xr-x  1 root        root          4096 May 22 02:08 ..
+-rw-rw----+ 1 agent-admin agent-admin 691441 May 22 03:33 agent_app.log
+-rw-rw----+ 1 agent-admin agent-admin     62 May 22 03:33 monitor.log
+```
+
+✅ **cron 누적 자체는 정상 동작** — `monitor.log` 가 매분 한 줄씩 append 됨.
+
+![스크린샷](screenshots/monitor-05.png)
+
+---
+
+### 11-4. 자연 발견 — `monitor.log` 그룹 비일관 (setgid 미적용)
+
+위 ls -la 의 그룹 컬럼을 보면 의도와 어긋남:
+
+| 항목 | 의도 | 현실 |
+|------|------|------|
+| 디렉터리 `/var/log/agent-app` 그룹 | agent-core | agent-core ✅ |
+| 새 생성 파일 (monitor.log, agent_app.log) 그룹 | **agent-core (부모 상속)** | **agent-admin** ❌ |
+
+#### 원인
+
+- 표준 동작: 새 파일은 *생성자의 primary group* 을 따라감
+- agent-admin 의 primary group = agent-admin (개인 그룹)
+- 부모 디렉터리 그룹 (agent-core) 상속하려면 **setgid 비트 필요**
+- `setup-mission.sh` 에서 의도적으로 `chmod 770` (setgid 없음) 으로 두었던 결과 —
+  자연 발견 흐름을 유지하기 위한 설계
+
+#### ACL 의 `+` 는 왜 있는데 그룹 owner 는 못 살리나
+
+```
+-rw-rw----+ 1 agent-admin agent-admin   ... monitor.log
+            ↑
+            ACL 적용 표시
+```
+
+`+` 는 default ACL (`setfacl -d -m g:agent-core:rwx`) 이 상속되어 ACL 권한이 박혔다는 뜻.
+하지만 **ACL 과 그룹 owner 는 직교적 메커니즘** — ACL 은 "어떤 그룹이 추가로 어떤 권한" 정의,
+그룹 owner 는 ls 의 3 번째 컬럼. 둘 다 필요한 경우가 있음.
+
+---
+
+### 11-5. 접근성 검증 — agent-dev OK / agent-test 차단
+
+setgid 가 없어도 ACL 만으로 미션의 R/W 요구가 충족되는지 실측.
+
+```bash
+root@codyssey05:/var/log# su - agent-dev -c 'cat /var/log/agent-app/monitor.log'
+[2026-05-22 03:33:01] PID:182 CPU:0.9% MEM:18.0% DISK_USED:4%
+[2026-05-22 03:34:02] PID:182 CPU:1.8% MEM:18.2% DISK_USED:4%
+[2026-05-22 03:35:02] PID:182 CPU:0.9% MEM:18.0% DISK_USED:4%
+[2026-05-22 03:36:02] PID:182 CPU:9.2% MEM:17.9% DISK_USED:4%
+... (12 줄, 매분 누적)
+
+root@codyssey05:/var/log# su - agent-test -c 'cat /var/log/agent-app/monitor.log'
+cat: /var/log/agent-app/monitor.log: Permission denied
+```
+
+#### 검증 매트릭스
+
+| 사용자 | agent-core 멤버 | POSIX 그룹 권한 | ACL `g:agent-core:rwx` | 결과 |
+|--------|:--------------:|:--------------:|:----------------------:|:----:|
+| agent-dev | ✅ | ❌ (그룹 owner 가 agent-admin) | ✅ 매칭 | **읽기 성공** ✅ |
+| agent-test | ❌ | ❌ | ❌ | **읽기 차단** ✅ |
+
+→ **default ACL 이 setgid 의 빈 자리를 메꿔주어 미션 요구 (agent-core R/W) 충족**.
+→ agent-test 차단은 의도된 보안 정책 작동 (negative test 통과).
+
+![스크린샷](screenshots/monitor-06.png)
+
+이 한 컷이 동시에 입증하는 세 가지:
+1. **cron 매분 누적 동작** (12 줄 = 12 분치)
+2. **agent-dev 의 그룹 협업** (ACL 실효성)
+3. **agent-test 의도된 차단** (역할 분리 정책)
+
+---
+
+### 11-6. (미해결) `monitor.log` 그룹 비일관 — 인지 후 보류
+
+setgid 자연 발견 항목은 본 학습 사이클에서 **인지만 하고 보류** 한다.
+
+#### 보류 사유
+
+- **미션 명시는 ❌** (3-4 표의 `⭕ 권장 (운영 위생)` 분류)
+- ACL 만으로도 미션의 *접근 정책 요구* 가 충족됨 (11-5 실측 입증)
+- setgid 가 보강하는 것은 *운영 위생* (ls -la 가독성, 그룹 owner 일관성) 으로, 별도 사이클로 분리하는 것이 학습 일지의 시간순 정합성에 맞음
+
+#### 운영 적용 시 해결 한 줄
+
+```bash
+chmod g+s /var/log/agent-app
+chgrp agent-core /var/log/agent-app/*.log
+
+# setup-mission.sh 의 chmod 770 → 2770 으로 영구 반영
+```
+
+#### 학습 포인트
+
+- **setgid 와 ACL 은 직교적 메커니즘**:
+  - ACL → 어떤 그룹이 어떤 권한을 갖는가 (*접근 정책*)
+  - setgid → 새 파일이 어떤 그룹으로 만들어지는가 (*생성 정책*)
+- ACL `+` 가 있어도 그룹 owner 자체는 setgid 없이는 못 바꿈
+- 운영 위생 = "ls -la 가 의도와 일치" — ACL 우회는 동작은 살리지만 가독성 부족
 
 ---
 
@@ -1462,7 +1680,14 @@ awk -v v="$value" -v t="$thresh" 'BEGIN { exit !(v > t) }'
 | 5 | Boot Sequence 5단계 [OK] + "Agent READY" | 9단계 | ✅ |
 | 6 | monitor.sh 실행 결과 (프로세스/포트/리소스/경고) | 10단계 | ✅ |
 | 7 | `/var/log/agent-app/monitor.log` 누적 기록 | 10단계 | ✅ |
-| 8 | crontab 매분 등록 + 자동 누적 확인 | 11단계 | ⏸ 예정 |
+| 8 | crontab 매분 등록 + 자동 누적 확인 | 11단계 (`monitor-04`, `monitor-05`) | ✅ |
+| 9 | 역할 분리 검증 (agent-dev R/W ✅ + agent-test 차단 ✅) | 11-5 (`monitor-06`) | ✅ |
+
+### 미해결 / 보류 항목 (⭕ 권장 분류)
+
+| # | 항목 | 분류 | 처리 |
+|---|------|------|------|
+| M1 | `monitor.log` 그룹 = agent-admin (setgid 미적용) | ⭕ 권장 / 운영 위생 | 11-6 — 인지 후 보류, ACL 로 미션 요구 충족 |
 
 ---
 
@@ -1470,7 +1695,6 @@ awk -v v="$value" -v t="$thresh" 'BEGIN { exit !(v > t) }'
 
 | 단계 | 함정 | 해결 |
 |------|------|------|
-| 9단계 (agent-app) | Ubuntu 22.04 GLIBC 2.35 — agent-app GLIBC 2.38 요구 | Dockerfile FROM 24.04로 변경 + 재구축 + setup-mission.sh 복구 |
 | 4단계 (Docker) | Apple Silicon에서 amd64 ELF 실행 불가 | `--platform=linux/amd64` |
 | 4단계 (Docker) | UFW가 iptables 조작 필요 | `--cap-add=NET_ADMIN` |
 | 4단계 (Docker) | 좀비 프로세스 누적 | `docker run --init` (tini) |
@@ -1485,6 +1709,12 @@ awk -v v="$value" -v t="$thresh" 'BEGIN { exit !(v > t) }'
 | 7단계 (권한) | `/home/agent-admin` traverse 차단 (24.04 기본 750) | 그룹을 agent-common으로 변경 |
 | 8단계 (env) | `.bashrc`는 cron이 안 읽음 | envfile + 명시적 `source` 패턴 |
 | 8단계 (env) | `ufw status` root 전용 | `/etc/sudoers.d/` fine-grained sudo |
+| 9단계 (agent-app) | Ubuntu 22.04 GLIBC 2.35 — agent-app GLIBC 2.38 요구 | Dockerfile FROM 24.04로 변경 + 재구축 + setup-mission.sh 복구 |
 | 10단계 (monitor) | `var=$(cmd)` 서브쉘 exit 미전파 | `\|\| exit 1` 명시 |
 | 10단계 (monitor) | bash 부동소수점 비교 불가 | awk exit code |
 | 10단계 (monitor) | pgrep 패턴 너무 넓어 잡음 매치 | `$` 앵커로 cmdline 끝 정확 매치 |
+| 10단계 (monitor) | root 가 `mkdir` 한 디렉터리는 `root:root + 755` (umask 022) — `$AGENT_HOME` 의 다른 디렉터리 패턴과 불일치 | `mkdir` 직후 `chown agent-admin:agent-core` + `chmod 750` 명시 |
+| 11단계 (cron) | `cron` 미설치 — 24.04 minimal 누락 함정 3 호 (`which cron` 빈 줄, `service cron start: unrecognized service`) | `apt install -y cron` + Dockerfile 영구 반영 |
+| 11단계 (cron) | UFW active 상태에서 `apt-get update` outbound TCP 막힘 (컨테이너 안 UFW 와 docker NAT 충돌) | apt 작업 전 `ufw disable` → 작업 후 `ufw enable` 패턴 |
+| 11단계 (cron) | `crontab -u agent-admin -e` 첫 호출 시 `select-editor` 프롬프트 (4 가지 옵션) | `2` (vim) 입력 또는 `EDITOR=vim crontab ...` 로 사전 지정 |
+| 11단계 (cron) | `monitor.log` 그룹 = agent-admin (setgid 미적용) — agent-dev 가 POSIX 그룹 권한으로 못 읽음 | ACL `g:agent-core:rwx` 가 보완 (미션 충족), setgid 적용은 운영 강화 시 (미해결 M1) |

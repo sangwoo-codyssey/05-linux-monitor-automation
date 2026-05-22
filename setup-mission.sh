@@ -1,12 +1,16 @@
 #!/bin/bash
-# 미션 1~3단계 재현용 부트스트랩 스크립트.
+# 미션 1~4단계 재현용 부트스트랩 스크립트.
 # - 컨테이너 재빌드 후 매번 깨끗한 상태에서 학습 환경을 빠르게 복구한다.
 # - idempotent 하지 않은 부분(useradd 등)은 있으면 skip 되도록 처리한다.
+# - 자연 발견 거리 3건은 의도적으로 미적용 (각 단계 주석 참고):
+#     1) setgid 비트 (Phase 6 monitor.log 그룹 발견 → chmod g+s)
+#     2) /home/agent-admin traverse (Phase 5 monitor.sh 접근 실패 → chown :agent-common)
+#     3) fine-grained sudo (Phase 6 sudo ufw status 실패 → /etc/sudoers.d 추가)
 
 set -e
 
 echo "=========================================="
-echo "  미션 5: 1~3단계 환경 자동 구성"
+echo "  미션 5: 1~4단계 환경 자동 구성"
 echo "=========================================="
 
 # -------------------------------------------
@@ -70,10 +74,11 @@ usermod -G agent-common,agent-core agent-admin
 usermod -G agent-common,agent-core agent-dev
 usermod -G agent-common              agent-test
 
-# Ubuntu 24.04는 useradd -m 기본값이 chmod 750이라 다른 그룹원이 traverse 불가.
-# /home/agent-admin 자체를 agent-common 그룹으로 풀어서 traverse 허용.
-chown agent-admin:agent-common /home/agent-admin
-chmod 750                       /home/agent-admin
+# Ubuntu 24.04는 useradd -m 기본값이 chmod 750 + agent-admin:agent-admin.
+# → agent-dev/test 가 /home/agent-admin 을 traverse 못 함.
+# → Phase 5 monitor.sh (agent-dev 소유) 가 /home/agent-admin/agent-app/... 접근 시 실패하면서
+#   "그룹 변경 (chown :agent-common) 으로 해결" 학습을 직접 경험하게 하는 자연 발견 거리.
+# 의도적으로 chown/chmod 미적용 — 24.04 useradd -m 기본값 그대로 둠.
 
 # 디렉터리
 AGENT_HOME="/home/agent-admin/agent-app"
@@ -81,18 +86,20 @@ mkdir -p "$AGENT_HOME/upload_files"
 mkdir -p "$AGENT_HOME/api_keys"
 mkdir -p /var/log/agent-app
 
-# 소유권 + 모드 (setgid 비트 포함 — 그룹 상속 보장)
+# 소유권 + 모드 — setgid 비트는 의도적으로 미적용.
+# Phase 6 (cron monitor.sh) 에서 monitor.log 의 그룹이 agent-admin 으로 박히는 것을
+# 자연스럽게 발견하고, chmod g+s 로 직접 fix 하는 학습 흐름을 유지하기 위함.
 chown agent-admin:agent-common "$AGENT_HOME"
-chmod 2750                     "$AGENT_HOME"
+chmod 750                      "$AGENT_HOME"
 
 chown agent-admin:agent-common "$AGENT_HOME/upload_files"
-chmod 2770                     "$AGENT_HOME/upload_files"
+chmod 770                      "$AGENT_HOME/upload_files"
 
 chown agent-admin:agent-core   "$AGENT_HOME/api_keys"
-chmod 2770                     "$AGENT_HOME/api_keys"
+chmod 770                      "$AGENT_HOME/api_keys"
 
 chown agent-admin:agent-core   /var/log/agent-app
-chmod 2770                     /var/log/agent-app
+chmod 770                      /var/log/agent-app
 
 # 기본 ACL (앞으로 만들어질 파일에도 정책 자동 적용)
 setfacl -m  g:agent-common:rwx "$AGENT_HOME/upload_files"
@@ -138,13 +145,10 @@ else
   echo "  - .profile 이미 source 라인 보유 (skip)"
 fi
 
-# (3) agent-admin 이 ufw status 만 패스워드 없이 실행 가능하도록 fine-grained sudo
-#     - monitor.sh 의 방화벽 상태 점검을 위해 필요
-#     - 전체 sudo 권한이 아닌 단일 read-only 명령만 허용 (최소 권한 원칙)
-SUDOERS_FILE="/etc/sudoers.d/agent-admin-monitor"
-echo 'agent-admin ALL=(root) NOPASSWD: /usr/sbin/ufw status' > "$SUDOERS_FILE"
-chmod 0440 "$SUDOERS_FILE"
-visudo -cf "$SUDOERS_FILE" >/dev/null && echo "  - sudoers 추가: $SUDOERS_FILE (ufw status only)"
+# (3) fine-grained sudo (ufw status NOPASSWD) — 의도적 미적용.
+#     Phase 6 cron monitor.sh 의 check_firewall 이 `sudo ufw status` 호출 →
+#     "agent-admin is not in the sudoers file" / 패스워드 요구로 실패하는 것을 직접 확인하고,
+#     /etc/sudoers.d/agent-admin-monitor 를 추가하여 최소 권한 원칙으로 해결하는 학습 흐름.
 
 # (4) 키 파일
 KEY_FILE="$AGENT_HOME/api_keys/t_secret.key"

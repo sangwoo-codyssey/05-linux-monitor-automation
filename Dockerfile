@@ -5,6 +5,12 @@
 #   * openssh-server: SSH 데몬 (Phase 1)
 #   * ufw           : 방화벽 (Phase 2)
 #   * acl           : setfacl/getfacl (Phase 3)
+#   * iproute2      : ss (Phase 4 — agent-app 포트 리스닝 검증)
+#                     ※ 24.04 minimal 에 기본 미포함 → 학습 중 발견된 함정
+#   * sudo          : visudo / agent-admin 의 fine-grained sudo (Phase 4 + monitor.sh)
+#                     ※ 24.04 minimal 에 기본 미포함 → 학습 중 발견된 함정
+#   * cron          : 매분 monitor.sh 자동 실행 (Phase 6)
+#                     ※ 24.04 minimal 에 기본 미포함 → 학습 중 발견된 함정
 #   * vim           : 텍스트 편집 (편의)
 FROM --platform=linux/amd64 ubuntu:24.04
 
@@ -16,6 +22,9 @@ RUN apt-get update && apt-get install -y \
         openssh-server \
         ufw \
         acl \
+        iproute2 \
+        sudo \
+        cron \
         vim \
     && ln -sf /usr/share/zoneinfo/$TZ /etc/localtime \
     && rm -rf /var/lib/apt/lists/*

@@ -89,8 +89,25 @@ case "${1:-shell}" in
     "$0" start
     ;;
   down)
-    echo "=== 컨테이너 정지 및 삭제 (모든 상태 소실) ==="
-    docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+    # 안전한 정지 — 컨테이너만 멈추고 파일시스템 상태는 보존.
+    # 실수로 학습 산출물(계정/디렉터리/sshd_config 등)을 날리는 사고를 막기 위해
+    # 삭제는 별도 명령(destroy)으로 분리한다.
+    echo "=== 컨테이너 정지 (상태 유지 — destroy 와 다름) ==="
+    docker stop "$CONTAINER_NAME"
+    echo "다시 켜기: ./run.sh start"
+    echo "완전 삭제: ./run.sh destroy"
+    ;;
+  destroy)
+    # 명시적 삭제 — 컨테이너 + 파일시스템 상태 모두 소실.
+    # 의도된 초기화 (학습 환경 재시작) 시에만 사용.
+    echo "=== 컨테이너 정지 + 삭제 (모든 상태 소실) ==="
+    read -r -p "정말 삭제하시겠습니까? (yes 입력) " confirm
+    if [[ "$confirm" == "yes" ]]; then
+      docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+      echo "삭제 완료."
+    else
+      echo "취소되었습니다."
+    fi
     ;;
   logs)
     docker logs -f "$CONTAINER_NAME"
@@ -100,7 +117,7 @@ case "${1:-shell}" in
     ;;
   *)
     cat <<EOF
-사용법: $0 {build|up|stop|start|restart|shell|exec|down|logs|status} [APP_DIR]
+사용법: $0 {build|up|stop|start|restart|shell|exec|down|destroy|logs|status} [APP_DIR]
 
 생명주기:
   build   - Docker 이미지 빌드
@@ -108,7 +125,8 @@ case "${1:-shell}" in
   stop    - 컨테이너 정지 (파일시스템 상태 유지 — 사용자/그룹/설정 보존)
   start   - 정지된 컨테이너 재시작 + sshd/ufw 자동 복구
   restart - stop + start
-  down    - 컨테이너 정지 및 삭제 (모든 상태 소실)
+  down    - 컨테이너 정지만 (stop 과 동일, 상태 유지) — 실수 방지
+  destroy - 컨테이너 정지 + 삭제 (모든 상태 소실, 명시 확인 필요)
 
 조작:
   shell   - 실행 중인 컨테이너에 root 셸로 접속 (기본값)
@@ -124,8 +142,8 @@ case "${1:-shell}" in
   - 현재 디렉터리를 컨테이너의 /app 에 바인드 마운트
 
 상태 보존 가이드:
-  - 일시 정지 후 재개: stop → start
-  - 영구 삭제 후 새로 시작: down → up → setup-mission.sh
+  - 일시 정지 후 재개: stop (또는 down) → start
+  - 영구 삭제 후 새로 시작: destroy → up → setup-mission.sh
 EOF
     exit 1
     ;;
