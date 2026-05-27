@@ -9,6 +9,25 @@
 1. **요구사항 수행 내역서** (본 문서)
 2. **자동화 스크립트** — `monitor.sh` (시스템 상태 수집 및 로깅)
 
+추가 산출물 (보너스):
+- `report.sh` — monitor.log 통계 리포트 (보너스 1)
+- `archive-compress.sh` — 7일 경과 로그 압축 (보너스 2)
+- `agent-app-monitor.logrotate` — logrotate 회전·아카이브·보존 정책
+
+### ⚡ Quick Start (평가자용 — 3분 재현)
+
+```bash
+git clone https://github.com/sangwoo-codyssey/05-linux-monitor-automation.git
+cd 05-linux-monitor-automation
+./run.sh build && ./run.sh up                                    # Docker 빌드 + 기동
+docker exec codyssey05 bash /app/setup-mission.sh                # 1~6단계 환경 자동 구성
+docker exec -d codyssey05 su - agent-admin -c /app/agent-app     # agent-app 백그라운드 기동
+docker exec codyssey05 sudo -u agent-admin /home/agent-admin/agent-app/bin/monitor.sh
+docker exec codyssey05 sudo -u agent-admin /home/agent-admin/agent-app/bin/report.sh   # 보너스 1
+```
+
+→ 자세한 검증 흐름은 §10 ~ §13, 함정 모음은 부록 D, 미션 체크리스트 ↔ 절 매핑은 부록 C.
+
 ---
 
 ## 2. 실행 환경
