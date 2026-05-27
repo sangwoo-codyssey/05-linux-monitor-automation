@@ -1,16 +1,18 @@
 #!/bin/bash
-# 미션 1~4단계 재현용 부트스트랩 스크립트.
+# 미션 1~6단계 재현용 부트스트랩 스크립트.
 # - 컨테이너 재빌드 후 매번 깨끗한 상태에서 학습 환경을 빠르게 복구한다.
 # - idempotent 하지 않은 부분(useradd 등)은 있으면 skip 되도록 처리한다.
 # - 자연 발견 거리 3건은 의도적으로 미적용 (각 단계 주석 참고):
 #     1) setgid 비트 (Phase 6 monitor.log 그룹 발견 → chmod g+s)
+#                    ※ Phase 7 logrotate 통합 후엔 회전 시점에 create 가 그룹을
+#                       agent-core 로 재설정 → 자연 발견 거리는 *첫 회전 전* 에만 유효
 #     2) /home/agent-admin traverse (Phase 5 monitor.sh 접근 실패 → chown :agent-common)
 #     3) fine-grained sudo (Phase 6 sudo ufw status 실패 → /etc/sudoers.d 추가)
 
 set -e
 
 echo "=========================================="
-echo "  미션 5: 1~4단계 환경 자동 구성"
+echo "  미션 5: 1~6단계 환경 자동 구성"
 echo "=========================================="
 
 # -------------------------------------------
@@ -156,6 +158,91 @@ echo 'agent_api_key_test' > "$KEY_FILE"
 chown agent-admin:agent-core "$KEY_FILE"
 chmod 640                    "$KEY_FILE"
 echo "  - 키 파일 생성: $KEY_FILE (640, agent-admin:agent-core)"
+
+# -------------------------------------------
+# 5단계: 로그 회전 정책 (logrotate)
+#   - 미션 §4.4 (필수, 10MB / 10개) + §5 보너스 2 의 *archive 이동 / 30일 삭제*
+#     를 logrotate 가 담당. *7일 경과 압축* 은 6단계의 archive-compress.sh 가
+#     분담 — 패턴 B 책임 분리 (README §13 참조).
+#   - 호스트의 agent-app-monitor.logrotate 를 /etc/logrotate.d/ 에 배포 +
+#     아카이브 디렉터리 사전 생성 + config 문법 검증.
+# -------------------------------------------
+echo ""
+echo "[5단계] logrotate 정책 배포"
+
+# (1) config 배포 — run.sh 가 호스트 디렉터리를 /app 에 bind mount 하므로
+#     호스트의 agent-app-monitor.logrotate 가 /app/ 에 보임.
+LOGROTATE_SRC="/app/agent-app-monitor.logrotate"
+LOGROTATE_DST="/etc/logrotate.d/agent-app-monitor"
+if [[ -f "$LOGROTATE_SRC" ]]; then
+  install -o root -g root -m 0644 "$LOGROTATE_SRC" "$LOGROTATE_DST"
+  echo "  - $LOGROTATE_DST 배포 완료 (root:root, 0644)"
+else
+  echo "  ! $LOGROTATE_SRC 없음 — 수동 배치 필요 (skip)"
+fi
+
+# (2) 아카이브 디렉터리 — logrotate 의 createolddir 가 첫 회전 시 만들어주지만,
+#     명시적 사전 생성으로 권한/소유를 setup 시점에 확정 (운영 위생).
+ARCHIVE_PARENT="/var/log/monitor"
+ARCHIVE_DIR="$ARCHIVE_PARENT/agent-app/archive"
+mkdir -p "$ARCHIVE_DIR"
+chown -R agent-admin:agent-core "$ARCHIVE_PARENT"
+chmod 750 "$ARCHIVE_PARENT" "$ARCHIVE_PARENT/agent-app" "$ARCHIVE_DIR"
+echo "  - 아카이브 디렉터리: $ARCHIVE_DIR (agent-admin:agent-core, 750)"
+
+# (3) config 문법 검증 — logrotate -d 는 dry-run, 상태 변경 없이 파싱 검사만
+if [[ -f "$LOGROTATE_DST" ]] && logrotate -d "$LOGROTATE_DST" >/dev/null 2>&1; then
+  echo "  - logrotate config 문법 OK"
+else
+  echo "  ! logrotate config 문법 의심 — 수동 확인: logrotate -d $LOGROTATE_DST"
+fi
+
+# -------------------------------------------
+# 6단계: 보너스 스크립트 (archive-compress.sh + report.sh) + cron
+#   - archive-compress.sh : 7일 경과 .log → .gz 압축 (보너스 2 의 정확한 시간 기반)
+#   - report.sh           : monitor.log 통계 리포트 (보너스 1)
+#   - 책임 분리 (패턴 B) — logrotate 의 7일 정확 흉내 불가 한계를 보완
+# -------------------------------------------
+echo ""
+echo "[6단계] 보너스 스크립트 배포 + cron"
+
+BIN_DIR="$AGENT_HOME/bin"
+mkdir -p "$BIN_DIR"
+chown agent-dev:agent-core "$BIN_DIR"
+chmod 750 "$BIN_DIR"
+
+# (1) archive-compress.sh 배포 (agent-dev:agent-core, 750)
+ARCHIVE_SCRIPT_SRC="/app/archive-compress.sh"
+ARCHIVE_SCRIPT_DST="$BIN_DIR/archive-compress.sh"
+if [[ -f "$ARCHIVE_SCRIPT_SRC" ]]; then
+  install -o agent-dev -g agent-core -m 0750 "$ARCHIVE_SCRIPT_SRC" "$ARCHIVE_SCRIPT_DST"
+  echo "  - $ARCHIVE_SCRIPT_DST 배포 (agent-dev:agent-core, 750)"
+else
+  echo "  ! $ARCHIVE_SCRIPT_SRC 없음 — skip"
+fi
+
+# (2) report.sh 배포 (agent-dev:agent-core, 750)
+REPORT_SCRIPT_SRC="/app/report.sh"
+REPORT_SCRIPT_DST="$BIN_DIR/report.sh"
+if [[ -f "$REPORT_SCRIPT_SRC" ]]; then
+  install -o agent-dev -g agent-core -m 0750 "$REPORT_SCRIPT_SRC" "$REPORT_SCRIPT_DST"
+  echo "  - $REPORT_SCRIPT_DST 배포 (agent-dev:agent-core, 750)"
+else
+  echo "  ! $REPORT_SCRIPT_SRC 없음 — skip"
+fi
+
+# (3) cron 등록 — monitor.sh (매분) + archive-compress.sh (매일 03:00)
+#     report.sh 는 수동 실행 (운영자가 필요할 때 호출)
+CRON_LINE_MONITOR="* * * * * $BIN_DIR/monitor.sh"
+CRON_LINE_ARCHIVE="0 3 * * * $BIN_DIR/archive-compress.sh >> /var/log/agent-app/archive-compress.log 2>&1"
+
+# 기존 crontab 보존하면서 중복 방지로 재구성
+(
+  echo "$CRON_LINE_MONITOR"
+  echo "$CRON_LINE_ARCHIVE"
+) | crontab -u agent-admin -
+echo "  - crontab 등록 (agent-admin)"
+crontab -u agent-admin -l | sed 's/^/    /'
 
 echo ""
 echo "=========================================="

@@ -7,7 +7,14 @@
 #   3) 자원 수집 — CPU / MEM / DISK 사용률
 #   4) 임계값 경고 — CPU>20%, MEM>10%, DISK>80% (warning만)
 #   5) 로그 누적 — /var/log/agent-app/monitor.log
-#   6) 로그 로테이션 — 10MB / 10개 파일 유지
+#
+# 로그 회전·보존은 logrotate (/etc/logrotate.d/agent-app-monitor) 가 회전·archive
+# 이동·30일 삭제를, archive-compress.sh 가 7일 경과 압축을 분담 (패턴 B 책임 분리).
+#   - 미션 §4.4 (10MB / 10개)            → logrotate
+#   - 미션 §5 보너스 2 archive/삭제/예외 → logrotate
+#   - 미션 §5 보너스 2 *7일 경과 압축*    → archive-compress.sh (find -mtime +7)
+#   - 이전 사이클의 자체 회전 함수 rotate_log_if_needed() 는 *이중 회전 충돌
+#     방지* 를 위해 제거.
 #
 # 실행 컨텍스트: cron이 매분 agent-admin 계정으로 호출
 #   → cron 환경은 .profile 을 읽지 않으므로 envfile 명시 source 필요
@@ -29,8 +36,7 @@ PROCESS_PATTERN="agent-app"
 THRESH_CPU=20
 THRESH_MEM=10
 THRESH_DISK=80
-LOG_MAX_SIZE=$((10 * 1024 * 1024))   # 10MB
-LOG_MAX_FILES=10
+# 로그 회전 임계는 logrotate 가 관리 → bash 상수 제거
 
 # =====================================================
 # 1. 자원 수집 함수들 — TODO(human)
@@ -113,21 +119,11 @@ check_threshold() {
 }
 
 # =====================================================
-# 4. 로그 로테이션 (10MB / 10개)
+# 4. 로그 회전 — 외부 도구가 담당 (패턴 B 책임 분리)
+#    - /etc/logrotate.d/agent-app-monitor  : 회전 + archive 이동 + 30일 삭제
+#    - $AGENT_HOME/bin/archive-compress.sh : 7일 경과 .log → .gz
+#    이전 bash 회전 함수는 이중 회전 충돌 방지로 제거됨
 # =====================================================
-rotate_log_if_needed() {
-  [[ ! -f "$LOG_FILE" ]] && return 0
-  local size
-  size=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
-  if (( size >= LOG_MAX_SIZE )); then
-    # .9 → .10, .8 → .9, ..., .1 → .2 순으로 한 칸씩 밀고
-    for ((i = LOG_MAX_FILES - 1; i >= 1; i--)); do
-      [[ -f "${LOG_FILE}.${i}" ]] && mv "${LOG_FILE}.${i}" "${LOG_FILE}.$((i+1))"
-    done
-    mv "$LOG_FILE" "${LOG_FILE}.1"
-    rm -f "${LOG_FILE}.$((LOG_MAX_FILES+1))" 2>/dev/null || true
-  fi
-}
 
 # =====================================================
 # 5. 메인 흐름
@@ -159,8 +155,7 @@ main() {
   check_threshold "MEM"  "$mem"  "$THRESH_MEM"
   check_threshold "DISK" "$disk" "$THRESH_DISK"
 
-  # 로그 누적
-  rotate_log_if_needed
+  # 로그 누적 (회전은 logrotate 가 별도 cron 으로 처리)
   local ts
   ts=$(date '+%Y-%m-%d %H:%M:%S')
   printf "[%s] PID:%s CPU:%s%% MEM:%s%% DISK_USED:%s%%\n" \

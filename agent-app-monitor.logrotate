@@ -1,0 +1,56 @@
+# /etc/logrotate.d/agent-app-monitor
+#
+# 미션 5 monitor.log 회전 + 보존 정책 (패턴 B — 책임 분리)
+#   - 본 config (logrotate) : 회전 + archive 이동 + 30일 경과 삭제
+#   - archive-compress.sh   : 7일 경과 .log → .gz 압축 (별도 cron, 매일)
+#
+# 패턴 A 시도 (compress + delaycompress) 의 한계:
+#   logrotate 는 *회전 시점* 도구라 "회전 후 N일 경과 압축" 이라는 *상태 기반*
+#   요구를 정확히 표현하지 못함 (delaycompress 는 *한 칸 지연* 일 뿐).
+#   미션 §5 보너스 2 의 "7일 경과 압축" 을 정확히 구현하려면 cron + find 패턴
+#   이 정석 — 회전과 압축을 *시점* vs *상태* 로 분리.
+#
+# 배포 위치: /etc/logrotate.d/agent-app-monitor  (setup-mission.sh가 cp)
+# 강제 회전 시험: logrotate -f /etc/logrotate.d/agent-app-monitor
+# 디버그 출력 (상태 변경 없이): logrotate -d /etc/logrotate.d/agent-app-monitor
+#
+# ⚠️ logrotate config 문법 주의:
+#   - 인라인 주석 (directive # comment) 은 *지원되지 않음*
+#   - 모든 주석은 줄 단독으로 (# 로 시작) 작성해야 함
+
+/var/log/agent-app/monitor.log {
+    # 회전 실행 주체 — 회전 시 새 파일을 agent-admin:agent-core 권한으로 생성
+    su agent-admin agent-core
+
+    # 회전 트리거 (일 단위 OR 10MB 도달)
+    #   daily    : 매일 cron.daily 시점에 회전 검토
+    #   maxsize  : 위 주기와 무관하게 10MB 도달 시 즉시 회전 (OR 동작)
+    #              size 가 아닌 maxsize 인 이유 — size 는 시간 트리거 무시 (AND/OR 차이)
+    daily
+    maxsize 10M
+
+    # 보관 정책 (개수 + 시간 이중 가드)
+    #   rotate 10 : 회전본 최대 10개까지 유지 (미션 §4.4)
+    #   maxage 30 : 30일 경과 회전본은 개수와 무관하게 삭제 (보너스 2)
+    rotate 10
+    maxage 30
+
+    # 압축은 archive-compress.sh 가 담당 — 본 config 에서 compress / delaycompress 제거.
+    # 책임 분리: logrotate = 회전 시점 / archive-compress.sh = 7일 경과 시점.
+
+    # 안전망 (silent failure 방지)
+    #   missingok  : monitor.log 자체가 아직 없어도 에러 X (setup 직후 첫 실행 대응)
+    #   notifempty : 빈 로그는 회전 안 함 (불필요한 빈 회전본 양산 방지)
+    missingok
+    notifempty
+
+    # 아카이브 위치 (회전본을 별도 디렉터리로 분리)
+    #   olddir        : 회전본 보관 디렉터리
+    #   createolddir  : 위 디렉터리가 없으면 자동 생성 (mode 0750, agent-admin:agent-core)
+    olddir /var/log/monitor/agent-app/archive/
+    createolddir 0750 agent-admin agent-core
+
+    # 회전 후 새 monitor.log 자동 생성 (mode + owner + group)
+    # cron 이 다음 분에 append 할 빈 파일을 미리 준비
+    create 0640 agent-admin agent-core
+}

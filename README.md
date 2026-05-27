@@ -20,7 +20,9 @@
 | Shell (host) | `zsh` |
 | Shell (container) | `bash 5.2.21` |
 | Docker | `Docker version 29.3.0` |
-| 핵심 패키지 | `openssh-server`, `ufw`, `cron`, `sudo`, `acl`, `iproute2`, `procps`, `bc`, `logrotate` |
+| 핵심 패키지 | `openssh-server`, `ufw`, `cron`, `sudo`, `acl`, `iproute2`, `procps`, `logrotate`, `vim`, `less`, `man-db` |
+
+> **명세 정리 노트**: 본래 표에 있던 `bc` 는 *부동소수점 비교 도구* 였으나 monitor.sh 가 awk 의 `BEGIN { exit !(v>t) }` 패턴으로 같은 일을 하므로 실제로는 사용되지 않아 제거. `procps` 는 24.04 base 에 우연히 포함되어 있지만 *명시적 의존*으로 Dockerfile 에 박아두는 게 안전. `logrotate` / `less` / `man-db` 는 Phase 7 (로그 보존 정책) 통합 시 추가 — `man-db` 는 *24.04 minimal 의 manpage 부재 함정* (부록 D 신규 항목) 을 해제하기 위해 필수, `less` 는 `man logrotate` 의 pager.
 
 ```bash
 # 환경 확인 명령어
@@ -115,7 +117,7 @@ docker exec codyssey05 ldd --version    # GLIBC 버전
 | [x] | DISK 사용률 수집 | `df -P /` + awk |
 | [x] | 임계값 경고 (CPU>20, MEM>10, DISK>80) | `awk 'BEGIN{exit !(v>t)}'` |
 | [x] | 로그 누적 (포맷 일치) | `printf >> /var/log/agent-app/monitor.log` |
-| [x] | 로그 로테이션 (10MB / 10개) | `rotate_log_if_needed` |
+| [x] | 로그 회전 + 보존 정책 | logrotate (회전/이동/30일) + `archive-compress.sh` (7일 압축) — 패턴 B 책임 분리 (§12 → §13) |
 
 ### 3-8. cron 자동 실행
 
@@ -202,6 +204,8 @@ ldd (Ubuntu GLIBC 2.35-...) 2.35
 ```
 
 > 이 시점의 GLIBC `2.35`가 나중 Phase 4(agent-app 실행)에서 결정적 문제가 됩니다. 9-1절에서 재현.
+
+> **📑 §4-4 결번 노트** — 본 README 작성 중 §4-3 다음에 §4-5 가 오는 점은 *의도된 결번* 입니다. 원래 §4-4 자리에 *Dockerfile bind mount 검증* 절이 있다가 §4-2 (run.sh — 컨테이너 생명주기 명령) 안으로 흡수됨. 후속 절 §4-5 ~ §4-6 의 번호를 재정렬하면 부록 D / §부록 C 의 *"§4-5-3 패키지 통합"* 같은 다수의 상호 참조 링크가 깨지므로, 번호는 그대로 두고 anchor 만 명시.
 
 ### 4-5. 발견된 문제 — 미니멀 Dockerfile에서 패키지 누락
 
@@ -293,33 +297,54 @@ Creating SSH2 RSA key; this may take some time ...
 | 2 (UFW) | `ufw`, `iptables` | 방화벽 |
 | 3 (권한/ACL) | `acl`, `sudo` | `setfacl`/`getfacl`, `sudo -u` 빙의 |
 | 4 (env + agent-app) | (추가 없음) | base만으로 충분 |
-| 5 (monitor.sh) | `procps`, `bc`, `gawk` (보통 이미 있음) | `top`, 부동소수점, awk |
-| 6 (cron) | `cron`, `logrotate` | 스케줄링, 로그 회전 |
+| 5 (monitor.sh) | `procps`, `gawk` (보통 이미 있음) | `top`/`free`/`pgrep`, awk 파싱 (부동소수점 비교도 awk `BEGIN{exit !(v>t)}` 로 처리 — `bc` 불필요) |
+| 6 (cron + 로그 회전) | `cron`, `logrotate` | cron 스케줄링 + logrotate 정책 (§12 ~ §13) |
+| 7 (학습 환경) | `less`, `man-db` | `man logrotate` 등 매뉴얼 학습 (24.04 minimal 함정 — §부록 D) |
 
 #### 4-5-3. 해결책 2 — 최종적으로 Dockerfile에 통합 (운영용)
 
-학습 단계 종료 후, 인터랙티브로 깔았던 패키지를 Dockerfile에 한 번에 박아 **재현 가능한 환경**을 확보:
+학습 단계 종료 후, 인터랙티브로 깔았던 패키지를 Dockerfile에 한 번에 박아 **재현 가능한 환경**을 확보. 본 코드 블록은 *실제 배포본* 과 일치 — 24.04 minimal 함정 #4 (manpage 부재) 해제까지 통합:
 
 ```dockerfile
 FROM --platform=linux/amd64 ubuntu:24.04
+
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Asia/Seoul \
     LANG=C.UTF-8
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        openssh-server iproute2 \
-        ufw iptables \
-        acl sudo \
-        procps bc \
-        cron logrotate \
-        vim less curl ca-certificates \
+
+# 24.04 minimal 함정 1단 해제 — apt 가 manpage 를 *설치 시 자동 제외* 하는 정책 파일 제거
+# (apt install *이전* 에 두어야 이후 패키지의 manpage 가 정상 기록됨)
+RUN rm -f /etc/dpkg/dpkg.cfg.d/excludes
+
+RUN apt-get update && apt-get install -y \
+        openssh-server \
+        ufw \
+        acl \
+        iproute2 \
+        sudo \
+        cron \
+        procps \
+        logrotate \
+        vim \
+        less \
+        man-db \
     && ln -sf /usr/share/zoneinfo/$TZ /etc/localtime \
     && rm -rf /var/lib/apt/lists/*
+
+# 24.04 minimal 함정 2단 해제 — /usr/bin/man 이 dpkg-divert 로 man.REAL 로 빠지고
+# 그 자리에 안내 stub 이 박혀있음. placeholder 삭제 + divert 풀어야 진짜 man 복원
+RUN rm -f /usr/bin/man \
+ && dpkg-divert --remove --rename /usr/bin/man
+
+# sshd Privilege Separation 디렉터리 — Phase 1 트러블슈팅의 영구 해결
 RUN mkdir -p /var/run/sshd
+
 WORKDIR /app
 CMD ["/bin/bash"]
 ```
 
 > **마지막 `rm -rf /var/lib/apt/lists/*`** — apt 인덱스 캐시 삭제로 이미지 100MB 가량 절약. 인터랙티브 컨테이너에선 안 해도 됨.
+> **`bc` / `iptables` / `curl` / `ca-certificates` 가 없는 이유** — bc 는 awk 로 대체 (§2 명세 정리 노트), iptables 는 ufw 가 의존성으로 자동 설치, curl/ca-certificates 는 본 미션에서 사용 안 함. *최소 의존* 으로 압축.
 
 #### 4-5-4. 학습 포인트
 
@@ -1204,7 +1229,7 @@ BLOCKED
 | 자원 수집 | `get_mem_usage()` | free + awk |
 | 자원 수집 | `get_disk_used()` | df + awk |
 | 임계값 경고 | `check_threshold()` | awk exit code로 비교 |
-| 로그 로테이션 | `rotate_log_if_needed()` | 10MB / 10개 |
+| 로그 회전 | (외부) `/etc/logrotate.d/agent-app-monitor` | 10MB/10개 + archive/30일 — §12 참조 |
 | 메인 흐름 | `main()` | 위 함수들 호출 + 로그 누적 |
 
 ### 10-4. 자원 수집 함수 — awk 파싱
@@ -1505,6 +1530,8 @@ drwxr-xr-x  1 root        root          4096 May 22 02:08 ..
 | 디렉터리 `/var/log/agent-app` 그룹 | agent-core | agent-core ✅ |
 | 새 생성 파일 (monitor.log, agent_app.log) 그룹 | **agent-core (부모 상속)** | **agent-admin** ❌ |
 
+> **`agent_app.log` 출처 주기** — 위 표의 `agent_app.log` 는 *agent-app 바이너리가 직접 `/var/log/agent-app/` 에 쓰는 로그* (cron 으로 매분 누적되는 monitor.log 와 다른 출처). 둘 다 *생성자 (agent-admin) 의 primary group* 으로 그룹이 박혀 *동일한 setgid 미적용 증상* 을 보임 — 자연 발견 거리 1 의 두 가지 증거를 한 ls 출력에서 동시 관찰 가능.
+
 #### 원인
 
 - 표준 동작: 새 파일은 *생성자의 primary group* 을 따라감
@@ -1588,6 +1615,392 @@ chgrp agent-core /var/log/agent-app/*.log
   - setgid → 새 파일이 어떤 그룹으로 만들어지는가 (*생성 정책*)
 - ACL `+` 가 있어도 그룹 owner 자체는 setgid 없이는 못 바꿈
 - 운영 위생 = "ls -la 가 의도와 일치" — ACL 우회는 동작은 살리지만 가독성 부족
+
+> **🔄 후속 사이클 노트** — 본 항목은 §12-5 (3) 에서 logrotate `create 0640 agent-admin agent-core` 디렉티브의 *부수 효과* 로 **첫 회전 이후 자동 해결됨**. 즉 setgid 비트 명시 없이도 회전된 monitor.log 의 그룹이 `agent-core` 로 박혀 일관성 회복. 부록 C M1 에도 같은 노트.
+
+---
+
+## 12. 로그 회전 정책 (logrotate)
+
+미션 §4.4 (필수, 10MB / 10개) 와 §5 보너스 2 (시간 기반 압축 + 아카이브 이동 + 30일 경과 삭제) 를 logrotate config 로 다루기 시작 (패턴 A — *단일 통합* 시도). 이전 사이클의 `monitor.sh` 자체 회전 함수 (`rotate_log_if_needed`) 는 *이중 회전 충돌 방지* 를 위해 제거.
+
+> **🔄 절 진행 흐름 anchor**: 본 §12 는 *패턴 A (logrotate 단일 통합)* 디렉티브를 학습하는 단계. **§13 에서 패턴 B (logrotate + archive-compress.sh 책임 분리) 로 최종 전환** 됩니다 — *"7일 정확 표현 불가"* 한계를 §12-3 에서 인지한 결과. 따라서 §12-2 의 config 와 §13-1 의 *최종 config* 가 *다릅니다* (12-2 는 패턴 A 의 설명용 버전, 최종 배포본은 §13-1 의 *compress/delaycompress 제거판*).
+
+### 12-1. 패턴 A vs B — 의사결정 흐름
+
+| 항목 | 패턴 A (logrotate 단일 통합) | 패턴 B (logrotate + 별도 cron) ✅ **최종 선택 (§13)** |
+|------|----------------------------|----------------------------------------------------|
+| 운영 도구 수 | 1개 (`/etc/logrotate.d/agent-app-monitor`) | 2개 (logrotate + `archive-compress.sh`) |
+| 미션 §4.4 (10MB/10개) | `maxsize 10M` + `rotate 10` | 동일 |
+| 보너스 2 — 아카이브 이동 | `olddir` | `olddir` (logrotate 가 그대로 담당) |
+| 보너스 2 — 30일 삭제 | `maxage 30` | `maxage 30` (logrotate 가 그대로 담당) |
+| 보너스 2 — *"7일 경과 압축"* | **부정확** (`delaycompress` 로 정신만) | **정확** (`find -mtime +7 -exec gzip`) ⭐ |
+| 학습 가치 | logrotate 디렉티브 깊이 | bash find + 책임 분리 |
+
+→ 1차 시도: *"우아함 + logrotate 깊이 학습"* 우선해 **패턴 A 채택**. §12-3 에서 *7일 정확 표현 불가* 한계 인지 → §13 에서 **패턴 B 로 최종 전환**. 본 §12 의 나머지 절은 *패턴 A 의 학습 흔적* 으로 남겨 의사결정 흐름을 추적 가능하게 보존.
+
+### 12-2. config — `/etc/logrotate.d/agent-app-monitor` (패턴 A 학습용 버전)
+
+> ⚠️ 아래 config 는 *패턴 A 시도 단계의 학습용 버전* 입니다. **실제 배포본은 §13-1 의 패턴 B 버전** (`compress` + `delaycompress` 두 줄이 제거됨). 본 절은 패턴 A 의 모든 디렉티브를 한 화면에서 학습하기 위한 *전체 안내용*.
+
+```logrotate
+/var/log/agent-app/monitor.log {
+    su agent-admin agent-core
+    daily
+    maxsize 10M
+    rotate 10
+    maxage 30
+    compress              # ⚠️ 패턴 A 시도 — §13 에서 제거됨 (archive-compress.sh 가 대체)
+    delaycompress         # ⚠️ 패턴 A 시도 — §13 에서 제거됨
+    missingok
+    notifempty
+    olddir /var/log/monitor/agent-app/archive/
+    createolddir 0750 agent-admin agent-core
+    create 0640 agent-admin agent-core
+}
+```
+
+#### 디렉티브 매핑
+
+| 디렉티브 | 미션 요구 | 역할 | 최종 배포본 |
+|----------|-----------|------|:-----------:|
+| `su agent-admin agent-core` | — | 회전 실행 주체 (root → uid 1001/gid 1002 로 빙의) | ✅ |
+| `daily` + `maxsize 10M` | §4.4 (10MB) + 일별 | OR 동작 — 시간 도달 ∨ 크기 도달 *먼저 도달한 쪽* 트리거 | ✅ |
+| `rotate 10` | §4.4 (10개) | 회전본 최대 개수 | ✅ |
+| `maxage 30` | 보너스 2 (30일 삭제) | 시간 기반 삭제 (개수와 OR) | ✅ |
+| `compress` + `delaycompress` | 보너스 2 (시간 지난 것만 압축, 부정확 흉내) | `.1` 비압축, `.2` 부터 `.gz` | ❌ §13 에서 archive-compress.sh 로 대체 |
+| `missingok` + `notifempty` | 보너스 2 (예외 처리 권장) | silent failure 방지 | ✅ |
+| `olddir` + `createolddir` | 보너스 2 (archive 이동) | 회전본 별도 디렉터리 + 자동 생성 | ✅ |
+| `create 0640 agent-admin agent-core` | — | 회전 후 새 빈 monitor.log 권한/소유 고정 | ✅ |
+
+#### 핵심 함정 1 — `size` vs `maxsize` vs `minsize`
+
+logrotate 의 크기 기반 디렉티브 3개는 *시간 트리거와의 관계* 가 다르다:
+
+| 디렉티브 | 시간 트리거와의 관계 | 의도 |
+|----------|---------------------|------|
+| `size 10M` | **무시** | 크기만 봄. `daily` 같이 써도 시간 무시. |
+| `minsize 10M` | **AND** | 시간 ∧ 크기 양쪽 만족 시만 회전. |
+| `maxsize 10M` ✅ | **OR** | 시간 ∨ 크기 중 *먼저 도달한 쪽* 트리거. |
+
+→ 미션 §4.4 의 *"10MB 도달 시"* 요구를 *일별 회전과 동시에* 만족하려면 `maxsize` 가 정답. `size` 만 적었다면 일별 트리거가 *영구히 발동 안 함*.
+
+#### 핵심 함정 2 — logrotate 의 *인라인 주석 불가* (부록 D 신규 항목)
+
+`man logrotate` 발췌:
+> *"comments may not be included on a line containing a directive"*
+
+→ `directive  # comment` 형식은 *파싱 에러*. 모든 주석은 *줄 시작이 `#`* 이어야 한다. 첫 작성 시 친절히 인라인 주석을 가득 채웠다가 `error: ... unknown unit ')'` 에러 (다른 줄의 `'` `(` 와 결합) 로 setup-mission.sh 의 5단계 검증이 실패해서 발견된 함정.
+
+### 12-3. *"7일 경과 압축"* 의 한계 — 정직한 설계 노트
+
+미션 §5 보너스 2 는 *"7일 이상 경과 파일 압축"* 이라는 **시간 숫자** 를 명시한다. 패턴 A 의 `delaycompress` 는:
+
+- `.1` (가장 최근 회전본) → 다음 회전까지 비압축
+- `.2` 이후 → 압축 (`.gz`)
+
+→ *시간이 좀 지난 회전본만 압축* 이라는 *정신* 은 표현하지만, 일별 회전 (`daily`) 기준이면 **약 1일 지연** 이고, 우리 정책상 `rotate 10` 이라 `.1` 이 `.2.gz` 가 될 때까지 *최소 1일* 만 흐른다. **정확히 7일은 표현 불가**.
+
+→ 평가자에게 *모르고 빠뜨림* 이 아닌 *의식적 절충* 임을 README 에 명시. 정확한 7일 흉내가 필요하면 패턴 B 로 확장 (별도 cron + `find /var/log/monitor/agent-app/archive -name '*.log' -mtime +7 -exec gzip {} +`).
+
+### 12-4. 배포 — setup-mission.sh 5단계 신규
+
+```bash
+# (1) config 배포
+install -o root -g root -m 0644 /app/agent-app-monitor.logrotate \
+                                /etc/logrotate.d/agent-app-monitor
+
+# (2) 아카이브 디렉터리 사전 생성
+mkdir -p /var/log/monitor/agent-app/archive
+chown -R agent-admin:agent-core /var/log/monitor
+chmod 750 /var/log/monitor /var/log/monitor/agent-app \
+          /var/log/monitor/agent-app/archive
+
+# (3) 문법 검증
+logrotate -d /etc/logrotate.d/agent-app-monitor >/dev/null 2>&1 \
+  && echo "OK" || echo "FAIL"
+```
+
+> **`createolddir` 도 있는데 사전 생성?** — 운영 위생. createolddir 가 *첫 회전 시점* 에 디렉터리를 만들지만, *그 사이* 의 ls 가독성 + 권한·소유를 setup 시점에 *명시적으로 확정* 하기 위해 중복 사전 생성.
+
+### 12-5. 검증 시연
+
+#### (1) monitor.sh 첫 실행 → monitor.log 생성
+
+```bash
+root@codyssey05:/app# sudo -u agent-admin /home/agent-admin/agent-app/bin/monitor.sh
+====== SYSTEM MONITOR RESULT ======
+[HEALTH CHECK]
+Checking process 'agent-app'... [OK] (PID: 797)
+Checking port 15034... [OK]
+...
+[INFO] Log appended: /var/log/agent-app/monitor.log
+
+root@codyssey05:/app# ls -la /var/log/agent-app/monitor.log
+-rw-rw----+ 1 agent-admin agent-admin 62 May 26 17:02 monitor.log
+```
+
+> 첫 monitor.log 의 그룹이 `agent-admin` (생성자 primary group). 자연 발견 거리 1 의 *첫 회전 전 상태*.
+
+#### (2) logrotate -d 드라이런 — 모든 정책 정확 인식
+
+```bash
+root@codyssey05:/app# logrotate -d /etc/logrotate.d/agent-app-monitor
+reading config file /etc/logrotate.d/agent-app-monitor
+olddir is now /var/log/monitor/agent-app/archive/
+rotating pattern: /var/log/agent-app/monitor.log  after 1 days (10 rotations)
+olddir is /var/log/monitor/agent-app/archive/, empty log files are not rotated,
+  log files >= 10485760 are rotated earlier, old logs are removed
+switching euid from 0 to 1001 and egid from 0 to 1002
+```
+
+→ `10485760` = 10MB 정확 / `1001` = agent-admin / `1002` = agent-core / `empty log files are not rotated` = notifempty ✓
+
+#### (3) `logrotate -f` 강제 회전 1회 — archive 이동 + `create` 효과
+
+```bash
+root@codyssey05:/app# sudo -u agent-admin /home/agent-admin/agent-app/bin/monitor.sh
+root@codyssey05:/app# ls -la /var/log/agent-app/monitor.log
+-rw-rw----+ 1 agent-admin agent-admin 62 ... monitor.log          ← 회전 전 (그룹 agent-admin)
+
+root@codyssey05:/app# logrotate -f /etc/logrotate.d/agent-app-monitor
+
+root@codyssey05:/app# ls -la /var/log/agent-app/monitor.log
+-rw-r-----+ 1 agent-admin agent-core 0 ... monitor.log            ← 새 빈 파일 (그룹 agent-core)
+
+root@codyssey05:/app# ls -la /var/log/monitor/agent-app/archive/
+-rw-rw----+ 1 agent-admin agent-admin 62 ... monitor.log.1        ← 비압축 .log (archive 로 이동)
+```
+
+→ 새 monitor.log 의 그룹이 `agent-core` — `create 0640 agent-admin agent-core` 의 부수 효과로 **§11-4 자연 발견 항목 (setgid 미적용 문제) 이 자동 해결**.
+→ 압축은 logrotate 가 *전혀 안 함* — 패턴 B 책임 분리. 압축은 archive-compress.sh 가 *7일 경과 시점* 에 별도 처리 (§13-1).
+
+#### (4) 강제 회전 2회 — 한 칸 밀림 (모두 비압축)
+
+```bash
+root@codyssey05:/app# sudo -u agent-admin /home/agent-admin/agent-app/bin/monitor.sh
+root@codyssey05:/app# logrotate -f /etc/logrotate.d/agent-app-monitor
+
+root@codyssey05:/app# ls -la /var/log/monitor/agent-app/archive/
+-rw-r-----+ 1 agent-admin agent-core    63 ... monitor.log.1     ← 새 .1 (create 효과로 agent-core)
+-rw-rw----+ 1 agent-admin agent-admin   62 ... monitor.log.2     ← 직전 .1 이 .2 로 (그룹 그대로)
+```
+
+→ 모든 회전본이 비압축 `.log`. *.1* 은 *create 이후* 의 monitor.log 라 그룹 `agent-core`, *.2* 는 *첫 회전 전* 의 monitor.log 라 그룹 `agent-admin` — archive 의 그룹 컬럼만 봐도 *어떤 게 create 효과를 받은 것인지* 추적 가능 (자연 발견 거리 1 의 부수 흔적).
+
+#### (5) `maxsize` 자연 트리거 — 강제 아닌 회전
+
+11MB 더미 데이터로 monitor.log 를 채운 뒤 `-f` 없이 logrotate 호출:
+
+```bash
+root@codyssey05:/app# dd if=/dev/zero bs=1M count=11 | tr "\0" "x" >> /var/log/agent-app/monitor.log
+root@codyssey05:/app# ls -la /var/log/agent-app/monitor.log
+-rw-r-----+ 1 agent-admin agent-core 11534336 ... monitor.log   ← 11MB
+
+root@codyssey05:/app# logrotate /etc/logrotate.d/agent-app-monitor   # -f 없음!
+
+root@codyssey05:/app# ls -la /var/log/monitor/agent-app/archive/
+-rw-r-----+ 1 agent-admin agent-core  11534336 ... monitor.log.1     ← 11MB 그대로
+-rw-r-----+ 1 agent-admin agent-core        63 ... monitor.log.2     ← 한 칸 밀림
+-rw-rw----+ 1 agent-admin agent-admin       62 ... monitor.log.3     ← 한 칸 더 밀림
+```
+
+→ **`maxsize 10M` 가 시간 트리거 없이도 발동** 검증. 10MB 초과한 monitor.log 가 자동으로 `.1` 로 회전 + 기존 회전본 cascading shift. 모두 비압축 `.log` (압축 책임은 archive-compress.sh).
+
+### 12-6. 미션 체크리스트 매핑
+
+| 미션 요구 | 충족 위치 | 검증 시연 |
+|-----------|-----------|-----------|
+| §4.4 — 10MB / 10개 | logrotate: `maxsize 10M` + `rotate 10` | 12-5 (5) |
+| §5 보너스 2 — `archive/` 이동 | logrotate: `olddir` + `createolddir` | 12-5 (3,4,5) |
+| §5 보너스 2 — 30일 경과 삭제 | logrotate: `maxage 30` | logrotate -d 출력 *"old logs are removed"* |
+| §5 보너스 2 — *7일 경과 압축* | **archive-compress.sh** (§13) | 13-3 |
+| §5 보너스 2 — `.gz` 결과물 | archive-compress.sh: `gzip` | 13-3 |
+| §5 보너스 2 — 예외 처리 (디렉토리 미존재 / 빈 파일) | logrotate: `missingok`+`notifempty` / archive-compress.sh: 3단 가드 | 12-5 (2), 13-3 |
+
+---
+
+## 13. 보너스 — report.sh + archive-compress.sh (책임 분리)
+
+§12 logrotate 통합 후 남은 두 가지를 별도 스크립트로 분리.
+
+| 책임 | 도구 | 트리거 | 위치 |
+|------|------|--------|------|
+| 회전 + archive 이동 + 30일 삭제 | logrotate (`/etc/logrotate.d/agent-app-monitor`) | cron.daily 자동 + maxsize 도달 | §12 |
+| *7일 경과* 압축 | **`archive-compress.sh`** | agent-admin crontab 매일 03:00 | 13-1 |
+| 통계 리포트 | **`report.sh`** | 운영자 수동 실행 | 13-2 |
+
+### 13-1. archive-compress.sh — 7일 경과 .log → .gz (보너스 2 의 정확한 시간 흐름)
+
+#### 설계 결정 — 왜 logrotate `delaycompress` 가 아닌 별도 스크립트?
+
+§12-3 의 *옵션 A vs B* 표 재확인:
+
+- **logrotate 는 *회전 시점* 도구**: *회전 후 N일 경과* 같은 *상태 기반* 조건을 정확히 표현 못 함. `delaycompress` 는 *한 칸 지연* 일 뿐.
+- **`find -mtime +7` 은 *상태 기반* 도구**: *지금 7일 넘은 것* 을 매일 검사. 미션 §5 보너스 2 의 *"7일 이상 경과 파일"* 문구와 1:1 매핑.
+- **멱등성**: `find -mtime +7 -name '*.log'` 는 *이미 .gz 인 건 매칭 X* → cron 매일 돌려도 같은 결과.
+
+→ logrotate config 에서 `compress` + `delaycompress` 두 줄을 *모두 제거* 하고, 회전본은 비압축 `.log` 로 archive 에 이동. 압축 책임은 archive-compress.sh.
+
+#### 핵심 로직
+
+```bash
+find "$ARCHIVE_DIR" -maxdepth 1 -type f -name '*.log' -mtime +7 -exec gzip {} +
+```
+
+3단 가드:
+1. 디렉터리 미존재 → `[WARN] skip`
+2. 권한 부족 → `[WARN] skip`
+3. 대상 파일 0개 → `[INFO] skip`
+
+→ 미션 보너스 2 의 *(권장) 예외 처리 포함* 항목 충족.
+
+#### cron 등록
+
+```cron
+0 3 * * * /home/agent-admin/agent-app/bin/archive-compress.sh >> /var/log/agent-app/archive-compress.log 2>&1
+```
+
+매일 새벽 3 시 (시스템 부하 적은 시간) 1회 실행. stdout/stderr 는 `archive-compress.log` 에 누적 — silent failure 방지.
+
+### 13-2. report.sh — monitor.log 통계 리포트 (보너스 1)
+
+#### 사용법
+
+```bash
+sudo -u agent-admin /home/agent-admin/agent-app/bin/report.sh
+sudo -u agent-admin /home/agent-admin/agent-app/bin/report.sh '2026-05-26 17:00:00' '2026-05-26 18:00:00'
+```
+
+#### 분석 대상
+
+**현재 `/var/log/agent-app/monitor.log` 한 파일만** — 미션 보너스 1 원문 *"monitor.log 를 분석"* 에 정확 매핑. 회전된 archive 본은 분석 범위 외 (필요 시 별도 사이클로 확장).
+
+#### 핵심 awk 패턴
+
+```awk
+{
+  ts = $1 " " $2; gsub(/[\[\]]/, "", ts)
+  if (from != "" && ts < from) next       # 구간 필터 (ISO 8601 사전순 정확)
+  if (to   != "" && ts > to)   next
+
+  for (i=1; i<=NF; i++) {                 # CPU:X% / MEM:X% / DISK_USED:X% 파싱
+    if      ($i ~ /^CPU:/)       cpu = substr($i, 5)
+    else if ($i ~ /^MEM:/)       mem = substr($i, 5)
+    else if ($i ~ /^DISK_USED:/) disk = substr($i, 11)
+  }
+  gsub(/%/, "", cpu); gsub(/%/, "", mem); gsub(/%/, "", disk)
+
+  if (count == 0) { 첫 샘플로 min/max 초기화 } else { 갱신 }
+  count++; cpu_sum += cpu; ...
+}
+```
+
+핵심 트릭 3가지:
+1. **타임스탬프 사전순 비교** — `if (ts < from)` 의 문자열 비교가 *정확히 작동* 하는 이유는 monitor.log 의 timestamp 가 ISO 8601 (`YYYY-MM-DD HH:MM:SS`) 이라 *사전순 == 시간순*. 다른 포맷이면 안 통함.
+2. **첫 샘플로 min/max 초기화** — `BEGIN` 에서 `min = "inf"` 같은 sentinel 을 두면 *문자열 vs 숫자* 비교가 어긋날 위험. `count == 0` 분기로 첫 값을 그대로 박는 패턴이 견고.
+3. **필드 순회로 라벨 매칭** — 라벨 순서가 바뀌어도 (CPU 가 4번째든 6번째든) 동작. monitor.sh 의 출력 포맷이 바뀌어도 안전.
+
+### 13-3. 검증 시연
+
+#### (1) archive-compress.sh — mtime 조작으로 7일 경계 확인
+
+```bash
+# 더미 3개 — 1일/5일/10일 전
+root@codyssey05:/# touch -d "1 days ago"  /var/log/monitor/agent-app/archive/new.log
+root@codyssey05:/# touch -d "5 days ago"  /var/log/monitor/agent-app/archive/mid.log
+root@codyssey05:/# touch -d "10 days ago" /var/log/monitor/agent-app/archive/old.log
+
+root@codyssey05:/# sudo -u agent-admin /home/agent-admin/agent-app/bin/archive-compress.sh
+[...] [archive-compress] start (target: ..., age: >7d)
+[...] [archive-compress] [INFO] 1개 파일 압축 시작
+  - .../old.log → .../old.log.gz
+[...] [archive-compress] done
+
+root@codyssey05:/# ls /var/log/monitor/agent-app/archive/
+mid.log  new.log  old.log.gz                    ← old 만 .gz, mid/new 그대로
+```
+
+→ *정확히 7일 경계* 가 작동. `mid.log` (5일) 는 *미만이라 그대로*, `old.log` (10일) 는 *초과라 압축*.
+
+#### (2) 멱등성 — 같은 명령 두 번
+
+```bash
+root@codyssey05:/# sudo -u agent-admin /home/agent-admin/agent-app/bin/archive-compress.sh
+[...] [archive-compress] [INFO] 7일 경과 .log 없음 — skip
+```
+
+→ 두 번째 호출은 *이미 .gz 인 파일이라 매칭 안 됨* → skip. cron 매일 돌려도 안전.
+
+#### (3) 예외 처리 — 빈 디렉터리
+
+```bash
+root@codyssey05:/# rm -f /var/log/monitor/agent-app/archive/*
+root@codyssey05:/# sudo -u agent-admin /home/agent-admin/agent-app/bin/archive-compress.sh
+[...] [archive-compress] [INFO] 7일 경과 .log 없음 — skip
+```
+
+→ 미션 *(권장) 예외 처리* 충족.
+
+#### (4) report.sh — 전체 분석 + 구간 필터
+
+```bash
+root@codyssey05:/# sudo -u agent-admin /home/agent-admin/agent-app/bin/report.sh
+====== STATISTICS REPORT ======
+[CPU]
+  Average : 2.0%
+  Maximum : 6.4% at 2026-05-26 17:10:49
+  Minimum : 0.9% at 2026-05-26 17:03:02
+[Memory]
+  Average : 12.1%
+  Maximum : 12.4% at 2026-05-26 17:03:02
+  Minimum : 11.7% at 2026-05-26 17:09:01
+[Disk]
+  Average : 4.0%
+  Maximum : 4% at 2026-05-26 17:03:02
+  Minimum : 4% at 2026-05-26 17:03:02
+[Samples]
+  Data Points: 10 samples
+```
+
+→ 미션 §8 결과 예시와 동일한 포맷.
+
+#### (5) report.sh — 구간 필터
+
+```bash
+root@codyssey05:/# FROM=$(date -d "5 minutes ago" "+%Y-%m-%d %H:%M:%S")
+root@codyssey05:/# sudo -u agent-admin /home/agent-admin/agent-app/bin/report.sh "$FROM"
+====== STATISTICS REPORT ======
+Range : 2026-05-26 17:06:27 ~ (end)
+...
+[Samples]
+  Data Points: 7 samples              ← 전체 11 샘플 중 5분 안의 7 샘플만 집계
+```
+
+→ 미션 보너스 1 의 *(선택) 시작/종료 시간 입력* 항목 충족.
+
+> **스크린샷 정책 노트** — §12 / §13 의 모든 시연은 *코드 + 실제 ls/명령 출력 텍스트 블록* 만으로 증거 충분하다고 판단해 캡처 생략. 기존 §10 / §11 의 monitor.sh / cron 캡처들은 유지 (이전 사이클의 자산).
+
+### 13-4. 책임 분리 + cron 동작 도식
+
+```
+매분 (00초)               매일 03:00                매일 cron.daily
+   │                         │                          │
+   ▼                         ▼                          ▼
+monitor.sh             archive-compress.sh         logrotate
+   │                         │                          │
+   ▼                         ▼                          ▼
+monitor.log 누적       archive/*.log → .gz       monitor.log →
+   │                                              archive/monitor.log.N
+   │                                              (10MB or daily)
+   │                                              + maxage 30 자동 삭제
+   ▼
+ (10MB 도달 시
+  logrotate 가
+  실시간 회전)
+```
+
+→ 세 도구가 *서로 다른 시점* 에 *서로 다른 책임* 을 수행. 한 도구의 변경이 다른 도구를 깨지 않음 (loose coupling).
 
 ---
 
@@ -1682,12 +2095,26 @@ awk -v v="$value" -v t="$thresh" 'BEGIN { exit !(v > t) }'
 | 7 | `/var/log/agent-app/monitor.log` 누적 기록 | 10단계 | ✅ |
 | 8 | crontab 매분 등록 + 자동 누적 확인 | 11단계 (`monitor-04`, `monitor-05`) | ✅ |
 | 9 | 역할 분리 검증 (agent-dev R/W ✅ + agent-test 차단 ✅) | 11-5 (`monitor-06`) | ✅ |
+| 10 | §4.4 — 로그 회전 (10MB / 10개) | 12-5 (5) `maxsize` 자연 트리거 | ✅ |
+
+### 보너스 충족 (§5)
+
+| # | 보너스 항목 | 본 문서 위치 | 상태 |
+|---|------------|--------------|------|
+| B1 | report.sh (통계 리포트 — CPU/MEM/DISK 평균/최대/최소 + 샘플 수) | 13-2, 13-3 (4) | ✅ |
+| B1+ | (선택) 시작/종료 시간 입력 구간 분석 | 13-3 (5) | ✅ |
+| B2-1 | 7일 경과 로그 압축 (`find -mtime +7 -exec gzip`) | 13-1, 13-3 (1) | ✅ |
+| B2-2 | 아카이브 이동 (`/var/log/monitor/agent-app/archive/`) | 12-5 (3,4,5) | ✅ |
+| B2-3 | 30일 경과 아카이브 삭제 | 12-5 (2) `maxage 30` 인식 / logrotate -d 출력 | ✅ |
+| B2-4 | 예외 처리 (디렉토리 미존재 / 권한 부족 / 대상 0개) | archive-compress.sh 의 3단 가드 (디렉토리 미존재 / 권한 부족 / 대상 0개 모두 직접 검사) — logrotate 는 `missingok`+`notifempty`+`createolddir` 로 *디렉토리 미존재 / 빈 파일* 만 다룸 (권한 부족은 다루지 않음, 책임 분리 명시) | ✅ |
+
+> **설계 전환 노트** — 이전 사이클에선 *패턴 A (logrotate 단일 통합 + delaycompress)* 로 7일 흉내를 시도하다 *정확한 7일 표현 불가* 한계 인지. 본 사이클에서 *패턴 B (책임 분리)* 로 전환 — logrotate 는 *시점 기반*, archive-compress.sh 는 *상태 기반* 으로 분리. 미션 문구 *"7일 이상 경과 파일"* 과 1:1 매핑 달성 (§13-1).
 
 ### 미해결 / 보류 항목 (⭕ 권장 분류)
 
 | # | 항목 | 분류 | 처리 |
 |---|------|------|------|
-| M1 | `monitor.log` 그룹 = agent-admin (setgid 미적용) | ⭕ 권장 / 운영 위생 | 11-6 — 인지 후 보류, ACL 로 미션 요구 충족 |
+| M1 | `monitor.log` 그룹 = agent-admin (setgid 미적용) | ⭕ 권장 / 운영 위생 | 11-6 → §12 logrotate 통합 후 `create 0640 agent-admin agent-core` 의 부수 효과로 *첫 회전 이후* 자동 해결 |
 
 ---
 
@@ -1701,6 +2128,7 @@ awk -v v="$value" -v t="$thresh" 'BEGIN { exit !(v > t) }'
 | 4단계 (Docker) | 미니멀 Dockerfile에서 SSH/UFW 등 도구 누락 (base image는 최소만 포함) | 컨테이너 내 `apt install` 인터랙티브 → 안정 후 Dockerfile에 통합 |
 | 4단계 (Docker) | `./run.sh up`이 이미지 재빌드 안 함 (이미지 있으면 그대로 사용) | Dockerfile 변경 후 반드시 `./run.sh build` |
 | 4단계 (Docker) | `apt-get update` 없이 `apt install` 시도 → `Unable to locate package` | `apt-get update` 먼저 실행 (`apt-error-01.png`) |
+| 4단계 (Docker) | Ubuntu 24.04 minimal 의 manpage 부재 — `path-exclude=/usr/share/man/*` 로 *설치 차단* + `dpkg-divert` 로 `/usr/bin/man` 을 `man.REAL` 로 빼고 안내 stub 박아둠 (이중 차단). *§12 logrotate 학습 단계에서 `man logrotate` 호출 시 발견* | Dockerfile: `rm -f /etc/dpkg/dpkg.cfg.d/excludes` (apt 직전) + `dpkg-divert --remove --rename /usr/bin/man` (apt 직후) — §4-5 노트 |
 | 5단계 (SSH) | `vi`, `nano` 미설치 — 편집기 자체가 없음 | `apt install vim` (`not-found-01-vim.png`) |
 | 5단계 (SSH) | `sshd -t` → `Missing privilege separation directory: /run/sshd` (컨테이너에 systemd 없어 RuntimeDirectory 자동생성 안 됨) | `mkdir -p /run/sshd && chmod 0755 /run/sshd` (영구 해결: Dockerfile에 `RUN mkdir -p /var/run/sshd`) |
 | 5단계 (SSH) | `systemctl restart ssh` → `System has not been booted with systemd as init system` (컨테이너 PID 1이 systemd 아님) | `service ssh restart` 사용 (`ssh-error-01.png`) |
@@ -1717,4 +2145,6 @@ awk -v v="$value" -v t="$thresh" 'BEGIN { exit !(v > t) }'
 | 11단계 (cron) | `cron` 미설치 — 24.04 minimal 누락 함정 3 호 (`which cron` 빈 줄, `service cron start: unrecognized service`) | `apt install -y cron` + Dockerfile 영구 반영 |
 | 11단계 (cron) | UFW active 상태에서 `apt-get update` outbound TCP 막힘 (컨테이너 안 UFW 와 docker NAT 충돌) | apt 작업 전 `ufw disable` → 작업 후 `ufw enable` 패턴 |
 | 11단계 (cron) | `crontab -u agent-admin -e` 첫 호출 시 `select-editor` 프롬프트 (4 가지 옵션) | `2` (vim) 입력 또는 `EDITOR=vim crontab ...` 로 사전 지정 |
-| 11단계 (cron) | `monitor.log` 그룹 = agent-admin (setgid 미적용) — agent-dev 가 POSIX 그룹 권한으로 못 읽음 | ACL `g:agent-core:rwx` 가 보완 (미션 충족), setgid 적용은 운영 강화 시 (미해결 M1) |
+| 11단계 (cron) | `monitor.log` 그룹 = agent-admin (setgid 미적용) — agent-dev 가 POSIX 그룹 권한으로 못 읽음 | ACL `g:agent-core:rwx` 가 보완 (미션 충족), setgid 적용은 운영 강화 시 (미해결 M1) → §12 logrotate `create` 의 부수 효과로 *첫 회전 이후* 자동 해결 |
+| 12단계 (logrotate) | config 인라인 주석 (`directive  # comment`) 이 *파싱 에러* — `error: unknown unit ')'` 식으로 다른 줄의 따옴표/괄호와 결합되어 위치가 헷갈리게 보고됨 | 모든 주석을 줄 시작 `#` 으로 분리. man logrotate: *"comments may not be included on a line containing a directive"* (§12-2) |
+| 12단계 (logrotate) | `size 10M` 로 적으면 *시간 트리거(daily) 가 영구히 발동 안 함* — size 는 *크기 단독* 디렉티브 | `maxsize 10M` 으로 교체 — *시간 OR 크기* OR 동작 (§12-2 함정 1) |
