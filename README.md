@@ -702,8 +702,8 @@ To                         Action      From
 root@codyssey05:/app# groupadd agent-common
 root@codyssey05:/app# groupadd agent-core
 root@codyssey05:/app# getent group agent-common agent-core
-agent-common:x:1001:
-agent-core:x:1002:
+agent-common:x:1000:
+agent-core:x:1001:
 ```
 
 ### 7-2. 사용자 생성 (보조 그룹 동시 가입)
@@ -716,11 +716,11 @@ root@codyssey05:/app# useradd -m -s /bin/bash -G agent-common,agent-core agent-d
 root@codyssey05:/app# useradd -m -s /bin/bash -G agent-common              agent-test
 
 root@codyssey05:/app# id agent-admin
-uid=1001(agent-admin) gid=1003(agent-admin) groups=1003(agent-admin),1001(agent-common),1002(agent-core)
+uid=1001(agent-admin) gid=1002(agent-admin) groups=1002(agent-admin),1000(agent-common),1001(agent-core)
 root@codyssey05:/app# id agent-dev
-uid=1002(agent-dev)   gid=1004(agent-dev)   groups=1004(agent-dev),1001(agent-common),1002(agent-core)
+uid=1002(agent-dev)   gid=1003(agent-dev)   groups=1003(agent-dev),1000(agent-common),1001(agent-core)
 root@codyssey05:/app# id agent-test
-uid=1003(agent-test)  gid=1005(agent-test)  groups=1005(agent-test),1001(agent-common)
+uid=1003(agent-test)  gid=1004(agent-test)  groups=1004(agent-test),1000(agent-common)
 ```
 
 > **`-m -s -G` 옵션 해석**
@@ -1275,7 +1275,7 @@ root@codyssey05:/app# top -bn1 | awk -F'[ ,]+' '
 
 #### MEM — `free -m` 의 `Mem:` 라인에서 used/total
 
-![스크린샷](screenshots/monitor-04.png)
+> (캡처 생략 — `monitor-04.png` 은 §11-2 의 crontab 등록 캡처로 사용됨)
 
 ```bash
 root@codyssey05:/app# free -m
@@ -1291,7 +1291,7 @@ root@codyssey05:/app# free -m | awk '/^Mem:/ { printf "%.1f", $3/$2*100 }'
 
 #### DISK — `df -P /` 의 5번째 컬럼
 
-![스크린샷](screenshots/monitor-05.png)
+> (캡처 생략 — `monitor-05.png` 은 §11-3 의 monitor.log 누적 캡처로 사용됨)
 
 ```bash
 root@codyssey05:/app# df -P /
@@ -1309,7 +1309,7 @@ root@codyssey05:/app# df -P / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }'
 
 #### 함정 A — `var=$(cmd)` 서브쉘 안의 exit는 메인을 종료 못 함
 
-![스크린샷](screenshots/monitor-06.png)
+> (캡처 생략 — `monitor-06.png` 은 §11-5 의 agent-dev/agent-test 접근성 검증 캡처로 사용됨)
 
 ```bash
 # ❌ 처음 시도 — agent-app이 죽었는데도 [OK] 출력
