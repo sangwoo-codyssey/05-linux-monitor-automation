@@ -2,7 +2,7 @@
 
 다중 사용자 환경의 **권한 관리 + 네트워크 보안 + 시스템 리소스 관제 + 로그 관리 자동화** 를 실제 운영 엔지니어처럼 직접 설계·구축·검증한 저장소입니다.
 
-본 문서는 **미션 §2 "필수 증거 자료 체크리스트 8건"** 을 그대로 챕터로 삼아, 각 항목마다 *검증 명령 → 실제 실행 결과 → 캡처* 를 한 흐름으로 담은 **자기충족형 증거 문서** 입니다. 별도 자료 (예: `JOURNAL.md`) 를 열어 보지 않아도 본 파일 한 개로 모든 평가 항목을 확인할 수 있습니다.
+본 문서는 **미션 2 "필수 증거 자료 체크리스트 8건"** 을 그대로 챕터로 삼아, 각 항목마다 *검증 명령 → 실제 실행 결과 → 캡처* 를 한 흐름으로 담은 **자기충족형 증거 문서** 입니다. 별도 자료 (예: `JOURNAL.md`) 를 열어 보지 않아도 본 파일 한 개로 모든 평가 항목을 확인할 수 있습니다.
 
 > 트러블슈팅·자연발견·의사결정 과정 등 *학습 일지* 는 별도 [`JOURNAL.md`](./JOURNAL.md) 에 보관 — 본 README 의 평가에는 필요 없음.
 
@@ -47,7 +47,7 @@ docker exec codyssey05 ldd --version     # GLIBC
 
 | 산출물 | 파일 | 역할 |
 |--------|------|------|
-| 요구사항 수행 내역서 | `README.md` (본 파일) | 미션 §2 의 필수 증거 8건 |
+| 요구사항 수행 내역서 | `README.md` (본 파일) | 미션 2 의 필수 증거 8건 |
 | 자동화 스크립트 | [`monitor.sh`](./monitor.sh) | Health Check + 자원 수집 + 임계값 경고 + 로그 누적 |
 | 환경 자동 구성 | [`setup-mission.sh`](./setup-mission.sh) | 1~4단계 (SSH/UFW/계정/env) 일괄 구성 — 재현용 |
 | 컨테이너 빌드 | [`Dockerfile`](./Dockerfile) | Ubuntu 24.04 + 필요한 패키지 |
@@ -55,24 +55,24 @@ docker exec codyssey05 ldd --version     # GLIBC
 
 ---
 
-# 미션 §2 — 필수 증거 자료 체크리스트 (8건)
+# 미션 2 — 필수 증거 자료 체크리스트 (8건)
 
 | # | 미션 명시 항목 | 본 README 챕터 | 결과 |
 |---|---------------|----------------|:----:|
-| 1 | SSH 포트 변경(20022) 및 Root 원격 접속 차단 설정 확인 | [§1](#1-ssh-포트-변경20022--root-원격-접속-차단) | ✅ |
-| 2 | 방화벽 활성화 및 20022/tcp, 15034/tcp만 허용 | [§2](#2-ufw-방화벽-활성화--2002215034만-허용) | ✅ |
-| 3 | 계정/그룹 생성 확인 | [§3](#3-계정그룹-생성-확인) | ✅ |
-| 4 | 디렉토리 구조 및 권한 (ACL 포함) 확인 | [§4](#4-디렉토리-구조--권한acl-포함) | ✅ |
-| 5 | 앱 Boot Sequence 5단계 [OK] 및 "Agent READY" 확인 | [§5](#5-앱-boot-sequence-55--agent-ready) | ✅ |
-| 6 | monitor.sh 실행 결과 (프로세스/포트/리소스/경고) | [§6](#6-monitorsh-실행-결과) | ✅ |
-| 7 | /var/log/agent-app/monitor.log 누적 기록 (최근 라인) | [§7](#7-varlogagent-appmonitorlog-누적-기록) | ✅ |
-| 8 | crontab 매분 실행 등록 및 자동 실행 확인 (1분 후 로그 증가) | [§8](#8-crontab-매분-실행-등록--자동-실행-확인) | ✅ |
+| 1 | SSH 포트 변경(20022) 및 Root 원격 접속 차단 설정 확인 | [1](#1-ssh-포트-변경20022--root-원격-접속-차단) | ✅ |
+| 2 | 방화벽 활성화 및 20022/tcp, 15034/tcp만 허용 | [2](#2-ufw-방화벽-활성화--2002215034만-허용) | ✅ |
+| 3 | 계정/그룹 생성 확인 | [3](#3-계정그룹-생성-확인) | ✅ |
+| 4 | 디렉토리 구조 및 권한 (ACL 포함) 확인 | [4](#4-디렉토리-구조--권한acl-포함) | ✅ |
+| 5 | 앱 Boot Sequence 5단계 [OK] 및 "Agent READY" 확인 | [5](#5-앱-boot-sequence-55--agent-ready) | ✅ |
+| 6 | monitor.sh 실행 결과 (프로세스/포트/리소스/경고) | [6](#6-monitorsh-실행-결과) | ✅ |
+| 7 | /var/log/agent-app/monitor.log 누적 기록 (최근 라인) | [7](#7-varlogagent-appmonitorlog-누적-기록) | ✅ |
+| 8 | crontab 매분 실행 등록 및 자동 실행 확인 (1분 후 로그 증가) | [8](#8-crontab-매분-실행-등록--자동-실행-확인) | ✅ |
 
 > 모든 검증 명령은 컨테이너 안에서 실행됨 (`docker exec codyssey05 …` 또는 `./run.sh shell` 후).
 
 ---
 
-## §1. SSH 포트 변경(20022) + Root 원격 접속 차단
+## 1. SSH 포트 변경(20022) + Root 원격 접속 차단
 
 ### 1-1. 세부 체크리스트
 
@@ -132,7 +132,7 @@ root@localhost: Permission denied (publickey,password).
 
 ---
 
-## §2. UFW 방화벽 활성화 + 20022/15034만 허용
+## 2. UFW 방화벽 활성화 + 20022/15034만 허용
 
 ### 2-1. 세부 체크리스트
 
@@ -190,7 +190,7 @@ To                         Action      From
 
 ---
 
-## §3. 계정/그룹 생성 확인
+## 3. 계정/그룹 생성 확인
 
 ### 3-1. 세부 체크리스트
 
@@ -253,7 +253,7 @@ agent-core:x:1001:agent-admin,agent-dev                   ← test 제외
 
 ---
 
-## §4. 디렉토리 구조 + 권한 (ACL 포함)
+## 4. 디렉토리 구조 + 권한 (ACL 포함)
 
 ### 4-1. 세부 체크리스트
 
@@ -396,11 +396,11 @@ root@codyssey05:/app# ls -la /home/agent-admin/agent-app/api_keys/ok_dev.txt
 -rw-rw----+ 1 agent-dev  agent-core   0 May 12 16:42 .../ok_dev.txt    ← dev가 만들었는데 그룹은 core
 ```
 
-→ **agent-common ↔ agent-core 역할 분리 정책이 정확히 작동**. 새 파일의 그룹 owner 가 setgid 로 부모 디렉터리 그룹을 자동 상속, ACL 의 default 항목과 함께 미션 §4.2 의 *"agent-core ONLY R/W"* 요구를 충족.
+→ **agent-common ↔ agent-core 역할 분리 정책이 정확히 작동**. 새 파일의 그룹 owner 가 setgid 로 부모 디렉터리 그룹을 자동 상속, ACL 의 default 항목과 함께 미션 4.2 의 *"agent-core ONLY R/W"* 요구를 충족.
 
 ---
 
-## §5. 앱 Boot Sequence 5/5 + "Agent READY"
+## 5. 앱 Boot Sequence 5/5 + "Agent READY"
 
 ### 5-1. 세부 체크리스트
 
@@ -497,7 +497,7 @@ Agent READY
 
 ![Boot Sequence 5/5](screenshots/boot-01.png)
 
-> **Boot Sequence 의 본질** — 5/5 [OK] 가 나왔다는 것은 §3 (사용자 생성), §4 (디렉터리 권한), §5 의 envfile / 키 파일 / 포트 가용성이 *동시에* 정상임을 앱 스스로 자가진단해 입증한 것. 한 출력으로 다수 항목이 함께 검증됨.
+> **Boot Sequence 의 본질** — 5/5 [OK] 가 나왔다는 것은 3 (사용자 생성), 4 (디렉터리 권한), 5 의 envfile / 키 파일 / 포트 가용성이 *동시에* 정상임을 앱 스스로 자가진단해 입증한 것. 한 출력으로 다수 항목이 함께 검증됨.
 
 ### 5-4. 포트 LISTEN + 일반 계정 실행 확인
 
@@ -525,7 +525,7 @@ agent-a+  2073  2072 13 12:18 ?  00:00:01 /run/rosetta/rosetta /app/agent-app /a
 
 ---
 
-## §6. monitor.sh 실행 결과
+## 6. monitor.sh 실행 결과
 
 ### 6-1. 세부 체크리스트
 
@@ -609,7 +609,7 @@ root@codyssey05:/app# echo $?
 - **Health Check** 프로세스 [OK], 포트 [OK]
 - **자원 수집** CPU / MEM / DISK 3종 모두 수집
 - **임계값 경고** MEM (13.2 > 10) 만 정확히 [WARNING], CPU/DISK 는 임계값 미만이라 경고 없음
-- **로그 누적** `[INFO] Log appended` 로 §7 의 monitor.log 기록 트리거
+- **로그 누적** `[INFO] Log appended` 로 7 의 monitor.log 기록 트리거
 
 ### 6-4. CPU/MEM/DISK 자원 수집 — awk 파싱 라인 점검
 
@@ -669,7 +669,7 @@ root@codyssey05:/app# echo $?
 1
 ```
 
-→ 미션 §4.4 *"비정상 시 exit 1"* 요구 충족. 포트 단독 다운도 같은 흐름 (`exit 1`).
+→ 미션 4.4 *"비정상 시 exit 1"* 요구 충족. 포트 단독 다운도 같은 흐름 (`exit 1`).
 
 ### 6-6. ✅ UFW 비활성 시 [WARNING] 만 (스크립트 종료 X)
 
@@ -703,11 +703,11 @@ root@codyssey05:/app# ufw --force enable
 Firewall is active and enabled on system startup
 ```
 
-→ `[WARNING]` 만 출력, 스크립트는 **정상 종료** (`exit 0`). 미션 §4.4 *"방화벽 비활성 시 [WARNING] 출력하되 스크립트는 종료하지 않는다"* 요구 충족.
+→ `[WARNING]` 만 출력, 스크립트는 **정상 종료** (`exit 0`). 미션 4.4 *"방화벽 비활성 시 [WARNING] 출력하되 스크립트는 종료하지 않는다"* 요구 충족.
 
 ---
 
-## §7. /var/log/agent-app/monitor.log 누적 기록
+## 7. /var/log/agent-app/monitor.log 누적 기록
 
 ### 7-1. 세부 체크리스트
 
@@ -729,7 +729,7 @@ drwxr-xr-x  1 root        root          4096 May 22 02:08 ..
 -rw-rw----+ 1 agent-admin agent-admin     62 May 22 03:33 monitor.log
 ```
 
-→ 디렉터리는 `agent-admin:agent-core` 의 770 + ACL (§4 결과). 로그 파일들은 생성자 (agent-admin) 의 primary group 으로 박힘 — ACL `+` 가 있어 *접근 정책* 은 `agent-core` 멤버 모두 R/W 보장.
+→ 디렉터리는 `agent-admin:agent-core` 의 770 + ACL (4 결과). 로그 파일들은 생성자 (agent-admin) 의 primary group 으로 박힘 — ACL `+` 가 있어 *접근 정책* 은 `agent-core` 멤버 모두 R/W 보장.
 
 ### 7-3. ✅ 최근 라인 — 미션 포맷 정확 일치
 
@@ -759,13 +759,13 @@ root@codyssey05:/var/log# su - agent-test -c 'cat /var/log/agent-app/monitor.log
 cat: /var/log/agent-app/monitor.log: Permission denied
 ```
 
-→ default ACL 의 `g:agent-core:rwx` 가 새로 생성된 monitor.log 에도 자동 상속 → `agent-dev` 가 R 가능, `agent-test` 는 차단. **§4 의 ACL 정책이 §7 의 로그 파일에서 실효성 입증**.
+→ default ACL 의 `g:agent-core:rwx` 가 새로 생성된 monitor.log 에도 자동 상속 → `agent-dev` 가 R 가능, `agent-test` 는 차단. **4 의 ACL 정책이 7 의 로그 파일에서 실효성 입증**.
 
 ![누적 + 협업 입증](screenshots/monitor-06.png)
 
 ---
 
-## §8. crontab 매분 실행 등록 + 자동 실행 확인
+## 8. crontab 매분 실행 등록 + 자동 실행 확인
 
 ### 8-1. 세부 체크리스트
 
@@ -811,7 +811,7 @@ root@codyssey05:/app# crontab -u agent-admin -l
 └───────── 분 (0-59)
 ```
 
-→ `* * * * *` = **매분 실행** (미션 §4.5 요구 일치).
+→ `* * * * *` = **매분 실행** (미션 4.5 요구 일치).
 
 ### 8-3. ✅ 1~2분 후 monitor.log 자동 누적 확인
 
@@ -852,22 +852,22 @@ root@codyssey05:/var/log# su - agent-dev -c 'cat /var/log/agent-app/monitor.log'
 ![cron 누적](screenshots/monitor-05.png)
 
 > **이 한 출력으로 동시 입증되는 항목**
-> 1. **§8** — cron 매분 누적 (12분치 = 12 라인)
-> 2. **§4** — ACL 의 그룹 협업 (agent-dev 가 읽기 가능)
-> 3. **§7** — monitor.log 포맷·경로·내용 일관성
+> 1. **8** — cron 매분 누적 (12분치 = 12 라인)
+> 2. **4** — ACL 의 그룹 협업 (agent-dev 가 읽기 가능)
+> 3. **7** — monitor.log 포맷·경로·내용 일관성
 
 ---
 
-# 부록 A. 미션 §3 학습 목표 6건 — 본 README 안의 설명 위치
+# 부록 A. 미션 3 학습 목표 6건 — 본 README 안의 설명 위치
 
 | # | 학습 목표 | 설명 위치 |
 |---|----------|-----------|
-| 1 | SSH 포트 변경 + Root 차단의 보안 의미 | [§1-2 호스트 시뮬](#1-2-검증-실행-결과) (Root 차단 정책 동작) |
-| 2 | UFW "필요 포트만 허용" 정책 구성·검증 | [§2 전체](#2-ufw-방화벽-활성화--2002215034만-허용) (default deny + 화이트리스트) |
-| 3 | 역할 기반 계정/그룹 + ACL 로 공유/보안 디렉토리 분리 | [§3](#3-계정그룹-생성-확인) + [§4](#4-디렉토리-구조--권한acl-포함) (빙의 매트릭스가 입증) |
-| 4 | `AGENT_HOME` 등 환경 변수로 실행 환경 고정 | [§5-2](#5-2-환경-변수--키-파일) (envfile + `.profile` source) |
-| 5 | 쉘 스크립트로 프로세스/포트/리소스 수집 + 로그 추적 | [§6](#6-monitorsh-실행-결과) (정상/실패/경고 3가지 시나리오) |
-| 6 | crontab 주기 실행 + 로그 보존 필요성 | [§8](#8-crontab-매분-실행-등록--자동-실행-확인) (1분 단위 자동 누적) |
+| 1 | SSH 포트 변경 + Root 차단의 보안 의미 | [1-2 호스트 시뮬](#1-2-검증-실행-결과) (Root 차단 정책 동작) |
+| 2 | UFW "필요 포트만 허용" 정책 구성·검증 | [2 전체](#2-ufw-방화벽-활성화--2002215034만-허용) (default deny + 화이트리스트) |
+| 3 | 역할 기반 계정/그룹 + ACL 로 공유/보안 디렉토리 분리 | [3](#3-계정그룹-생성-확인) + [4](#4-디렉토리-구조--권한acl-포함) (빙의 매트릭스가 입증) |
+| 4 | `AGENT_HOME` 등 환경 변수로 실행 환경 고정 | [5-2](#5-2-환경-변수--키-파일) (envfile + `.profile` source) |
+| 5 | 쉘 스크립트로 프로세스/포트/리소스 수집 + 로그 추적 | [6](#6-monitorsh-실행-결과) (정상/실패/경고 3가지 시나리오) |
+| 6 | crontab 주기 실행 + 로그 보존 필요성 | [8](#8-crontab-매분-실행-등록--자동-실행-확인) (1분 단위 자동 누적) |
 
 ---
 
@@ -880,7 +880,7 @@ root@codyssey05:/var/log# su - agent-dev -c 'cat /var/log/agent-app/monitor.log'
 ├── Dockerfile                          ← Ubuntu 24.04 + 패키지
 ├── run.sh                              ← 컨테이너 생명주기 명령
 ├── setup-mission.sh                    ← 1~4단계 환경 자동 구성
-├── monitor.sh                          ← 미션 핵심 (§4.4)
+├── monitor.sh                          ← 미션 핵심 (4.4)
 └── screenshots/                        ← 본 README 의 캡처 자산
 ```
 
