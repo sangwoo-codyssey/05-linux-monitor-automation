@@ -65,23 +65,43 @@ get_disk_used() {
   df -P / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }'
 }
 
+# agent-app 자원 사용률 — 후보 PID 들의 %cpu / %mem 합산
+#   - 입력: 공백 구분 PID 문자열 (get_app_pids 결과)
+#   - 출력: "<cpu> <mem>" 한 줄, 각 소수 1자리
+#   - 한 번의 ps 호출로 두 값 동시 측정 (race / 측정 시점 어긋남 최소화)
+#   - 후보가 1개면 그 PID 의 사용률, 2개 이상이면 합산 → 부모/자식 판별 불필요
+#   - "$pids" 는 반드시 따옴표로 묶어 단일 인자로 전달 → procps ps 가 공백/콤마
+#     구분 PID 리스트로 파싱. 따옴표 빼면 워드 스플리팅으로 ps 가 깨진다.
+#   - -o %cpu=,%mem= 의 "=" 는 헤더 제거 (필드명 = 빈 헤더)
+get_app_usage() {
+  local pids="$1"
+  ps -p "$pids" -o %cpu=,%mem= \
+    | awk '{ c += $1; m += $2 } END { printf "%.1f %.1f", c, m }'
+}
+
 # =====================================================
 # 2. Health Check — TODO(human)
 # =====================================================
 
-# agent-app 프로세스 PID 찾기
-#   - pgrep -f "/app/agent-app$" — cmdline 의 *끝*이 정확히 /app/agent-app 인 것만
-#     매치 → su/bash 래퍼(끝이 "2>&1") 와 임의의 echo 잡음 제거
-#   - 여러 개 매치되면 첫 번째 PID만 사용
-#   - 없으면 stderr 로 [FAIL] + exit 1
+# agent-app 후보 PID 목록 (공백 구분 한 줄)
+#   - cmdline 의 *끝*이 /app/agent-app 인 것만 매치 (su/bash 래퍼 제외)
+#   - Rosetta(Apple Silicon) 환경에서는 같은 패턴에 부모/자식 2개가 매치되고,
+#     순수 리눅스에서는 1개만 매치된다.
+#   - PID 번호 순서(작은 게 부모?)는 우연이므로 절대 정렬/선택 기준으로 쓰지 않는다.
+#     "후보 전부" 를 그대로 반환하고, 자원 합산은 호출자(get_app_usage)가 ps 로 처리.
+get_app_pids() {
+  pgrep -f "/app/agent-app$" | xargs   # 줄바꿈 → 공백
+}
+
+# 프로세스 헬스체크 — 후보가 0개면 FAIL/exit 1, 1개 이상이면 PIDS 문자열 echo
 check_process() {
-  local pid
-  pid=$(pgrep -f "/app/agent-app$" | head -1)
-  if [[ -z "$pid" ]]; then
+  local pids
+  pids=$(get_app_pids)
+  if [[ -z "$pids" ]]; then
     echo "Checking process '${PROCESS_PATTERN}'... [FAIL]" >&2
     exit 1
   fi
-  echo "$pid"
+  echo "$pids"
 }
 
 # 포트 LISTEN 확인 (참고 — 직접 작성된 예)
@@ -134,21 +154,23 @@ main() {
   echo "[HEALTH CHECK]"
 
   # 서브쉘 안의 exit 1 은 메인까지 전파되지 않으므로 || exit 1 로 명시 catch
-  local pid
-  pid=$(check_process) || exit 1
-  echo "Checking process '${PROCESS_PATTERN}'... [OK] (PID: $pid)"
+  local pids
+  pids=$(check_process) || exit 1
+  echo "Checking process '${PROCESS_PATTERN}'... [OK] (PIDs: $pids)"
   check_port
   check_firewall
 
   echo
   echo "[RESOURCE MONITORING]"
-  local cpu mem disk
+  local cpu mem disk app_cpu app_mem
   cpu=$(get_cpu_usage)
   mem=$(get_mem_usage)
   disk=$(get_disk_used)
-  printf "CPU Usage : %s%%\n" "$cpu"
-  printf "MEM Usage : %s%%\n" "$mem"
-  printf "DISK Used : %s%%\n" "$disk"
+  read -r app_cpu app_mem < <(get_app_usage "$pids")
+
+  printf "CPU   System: %5s%%   App: %5s%%\n" "$cpu" "$app_cpu"
+  printf "MEM   System: %5s%%   App: %5s%%\n" "$mem" "$app_mem"
+  printf "DISK  System: %5s%%\n"              "$disk"
 
   echo
   check_threshold "CPU"  "$cpu"  "$THRESH_CPU"
@@ -156,10 +178,11 @@ main() {
   check_threshold "DISK" "$disk" "$THRESH_DISK"
 
   # 로그 누적 (회전은 logrotate 가 별도 cron 으로 처리)
-  local ts
+  local ts pids_csv
   ts=$(date '+%Y-%m-%d %H:%M:%S')
-  printf "[%s] PID:%s CPU:%s%% MEM:%s%% DISK_USED:%s%%\n" \
-    "$ts" "$pid" "$cpu" "$mem" "$disk" >> "$LOG_FILE"
+  pids_csv=$(echo "$pids" | tr ' ' ',')
+  printf "[%s] PIDS:%s SYS_CPU:%s%% SYS_MEM:%s%% APP_CPU:%s%% APP_MEM:%s%% DISK_USED:%s%%\n" \
+    "$ts" "$pids_csv" "$cpu" "$mem" "$app_cpu" "$app_mem" "$disk" >> "$LOG_FILE"
 
   echo
   echo "[INFO] Log appended: $LOG_FILE"
