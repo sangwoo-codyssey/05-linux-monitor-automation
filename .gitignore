@@ -5,8 +5,6 @@
 # 임시 로그
 *.log
 
-# 미션 제공 바이너리 (zip에서 추출, 별도 다운로드)
-agent-app
 
 # macOS
 .DS_Store
